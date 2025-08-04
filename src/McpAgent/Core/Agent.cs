@@ -22,6 +22,8 @@ public class Agent : IAgent
     private readonly IPromptService _promptService;
     private readonly IStreamingService _streamingService;
     private readonly ISessionManager _sessionManager;
+    private readonly IContextManager _contextManager;
+    private readonly TokenCounter _tokenCounter;
 
     public Agent(
         ILogger<Agent> logger,
@@ -31,7 +33,9 @@ public class Agent : IAgent
         IConversationManager conversationManager,
         IPromptService promptService,
         IStreamingService streamingService,
-        ISessionManager sessionManager)
+        ISessionManager sessionManager,
+        IContextManager contextManager,
+        TokenCounter tokenCounter)
     {
         _logger = logger;
         _config = options.Value;
@@ -41,6 +45,8 @@ public class Agent : IAgent
         _promptService = promptService;
         _streamingService = streamingService;
         _sessionManager = sessionManager;
+        _contextManager = contextManager;
+        _tokenCounter = tokenCounter;
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -94,13 +100,21 @@ public class Agent : IAgent
             var history = await _conversationManager.GetHistoryAsync(request.ConversationId, cancellationToken: cancellationToken);
             var availableTools = await _mcpClient.GetAvailableToolsAsync(cancellationToken);
 
+            // Optimize context for token constraints
+            var maxPromptTokens = _config.Llm.MaxTokens - _config.Llm.MaxToolContextTokens;
+            var optimizedContext = await _contextManager.OptimizeContextAsync(
+                history, availableTools, request.Message, maxPromptTokens, cancellationToken);
+
             var systemPrompt = BuildSystemPrompt();
-            var contextualPrompt = BuildContextualPrompt(systemPrompt, request.Message, history);
+            var contextualPrompt = BuildOptimizedPrompt(systemPrompt, request.Message, optimizedContext);
+            
+            _logger.LogDebug("Context optimization: {Strategy}, Tokens: {Tokens}, Tools: {ToolCount}",
+                optimizedContext.OptimizationStrategy, optimizedContext.TokensUsed, optimizedContext.RelevantTools.Count);
             
             var response = await _llmProvider.GenerateResponseAsync(
                 contextualPrompt,
-                history,
-                availableTools,
+                optimizedContext.RecentMessages,
+                optimizedContext.RelevantTools,
                 cancellationToken);
 
             var agentResponse = await ProcessLlmResponse(response, request.ConversationId, cancellationToken);
@@ -422,24 +436,43 @@ Use EXACT tool names and include ALL required parameters.";
         await _conversationManager.AddMessageAsync(conversationId, assistantMessage, cancellationToken);
     }
 
-    private string BuildContextualPrompt(string systemPrompt, string currentMessage, List<ConversationMessage> history)
+    private string BuildOptimizedPrompt(string systemPrompt, string currentMessage, OptimizedContext context)
     {
         var contextBuilder = new StringBuilder();
         contextBuilder.AppendLine(systemPrompt);
         contextBuilder.AppendLine();
 
-        // Include conversation history for context, but manage token limits
-        var maxHistoryTokens = _config.Llm.MaxHistoryTokens;
-        var historyToInclude = GetRelevantHistory(history, maxHistoryTokens);
-
-        if (historyToInclude.Count > 0)
+        // Add available tools info - prioritize relevant tools
+        if (context.RelevantTools.Count > 0)
         {
-            contextBuilder.AppendLine("Previous conversation:");
-            foreach (var message in historyToInclude)
+            contextBuilder.AppendLine("🔧 PRIORITY TOOLS (most relevant for this request):");
+            foreach (var tool in context.RelevantTools.Take(5))
+            {
+                contextBuilder.AppendLine($"• {tool.Name}: {tool.Description ?? "Available tool"}");
+            }
+            
+            if (context.AllTools.Count > context.RelevantTools.Count)
+            {
+                var otherToolsCount = context.AllTools.Count - context.RelevantTools.Count;
+                contextBuilder.AppendLine($"• ... and {otherToolsCount} other tools available");
+            }
+            contextBuilder.AppendLine();
+        }
+
+        // Add conversation context
+        if (context.HasSummary && !string.IsNullOrEmpty(context.HistorySummary))
+        {
+            contextBuilder.AppendLine($"📋 {context.HistorySummary}");
+            contextBuilder.AppendLine();
+        }
+
+        if (context.RecentMessages.Count > 0)
+        {
+            contextBuilder.AppendLine("💬 Recent conversation:");
+            foreach (var message in context.RecentMessages)
             {
                 if (message.Role == "tool")
                 {
-                    // Summarize tool calls to save tokens
                     var toolSummary = SummarizeToolCall(message.Content);
                     contextBuilder.AppendLine($"[Tool used: {toolSummary}]");
                 }
@@ -456,30 +489,6 @@ Use EXACT tool names and include ALL required parameters.";
         return contextBuilder.ToString();
     }
 
-    private List<ConversationMessage> GetRelevantHistory(List<ConversationMessage> history, int maxTokens)
-    {
-        if (history.Count == 0) return new List<ConversationMessage>();
-
-        var relevantHistory = new List<ConversationMessage>();
-        var currentTokens = 0;
-
-        // Start from most recent and work backwards
-        for (int i = history.Count - 1; i >= 0; i--)
-        {
-            var message = history[i];
-            var messageTokens = TokenCounter.CountTokens(message.Content);
-            
-            if (currentTokens + messageTokens > maxTokens && relevantHistory.Count > 0)
-            {
-                break; // Stop if adding this message would exceed token limit
-            }
-
-            relevantHistory.Insert(0, message);
-            currentTokens += messageTokens;
-        }
-
-        return relevantHistory;
-    }
 
     private string SummarizeToolCall(string toolCallContent)
     {

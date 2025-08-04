@@ -72,6 +72,8 @@ var builder = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IStreamingService, ConsoleStreamingService>();
         services.AddSingleton<ISessionManager, SessionManager>();
         services.AddSingleton<IHealthCheckService, HealthCheckService>();
+        services.AddSingleton<IContextManager, ContextManager>();
+        services.AddSingleton<TokenCounter>();
         services.AddSingleton<IAgent, Agent>();
 
         services.AddHostedService<AgentHostedService>();

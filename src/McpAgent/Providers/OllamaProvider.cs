@@ -14,12 +14,17 @@ public class OllamaProvider : ILlmProvider
     private readonly ILogger<OllamaProvider> _logger;
     private readonly LlmConfiguration _config;
     private readonly Kernel _kernel;
+    
+    private TokenCounter _tokenCounter;
 
-    public OllamaProvider(ILogger<OllamaProvider> logger, IOptions<AgentConfiguration> options)
+    public OllamaProvider(ILogger<OllamaProvider> logger, IOptions<AgentConfiguration> options,
+        TokenCounter tokenCounter)
     {
         _logger = logger;
         _config = options.Value.Llm;
-        
+
+        _tokenCounter = tokenCounter;
+
         _kernel = Kernel.CreateBuilder()
             .AddOllamaChatCompletion(
                 modelId: _config.Model,
@@ -85,7 +90,7 @@ public class OllamaProvider : ILlmProvider
         
         // Trim history to fit within token limits
         var historyTexts = history.Select(m => $"{m.Role}: {m.Content}").ToList();
-        var trimmedHistory = TokenCounter.TrimToTokenLimit(historyTexts, _config.MaxHistoryTokens);
+        var trimmedHistory = _tokenCounter.TrimToTokenLimit(historyTexts, _config.MaxHistoryTokens);
         
         foreach (var historyText in trimmedHistory)
         {
@@ -96,7 +101,7 @@ public class OllamaProvider : ILlmProvider
         prompt.AppendLine("assistant:");
         
         var finalPrompt = prompt.ToString();
-        var estimatedTokens = TokenCounter.EstimateTokens(finalPrompt);
+        var estimatedTokens = _tokenCounter.EstimateTokens(finalPrompt);
         
         _logger.LogDebug("Built prompt with estimated {TokenCount} tokens", estimatedTokens);
         

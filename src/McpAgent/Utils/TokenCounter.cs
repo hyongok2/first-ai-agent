@@ -14,7 +14,7 @@ public class TokenCounter
         _logger = logger;
     }
     
-    public static int CountTokens(string text)
+    public int CountTokens(string text)
     {
         if (string.IsNullOrEmpty(text))
             return 0;
@@ -44,7 +44,7 @@ public class TokenCounter
         return totalTokens > maxTokens;
     }
     
-    public static List<string> TrimToTokenLimit(List<string> texts, int maxTokens)
+    public List<string> TrimToTokenLimit(List<string> texts, int maxTokens)
     {
         var result = new List<string>();
         var currentTokens = 0;
@@ -67,7 +67,7 @@ public class TokenCounter
         return result;
     }
     
-    public static int EstimateTokens(string text) => CountTokens(text);
+    public int EstimateTokens(string text) => CountTokens(text);
     
     private static int CountEnglishCharacters(string text)
     {
