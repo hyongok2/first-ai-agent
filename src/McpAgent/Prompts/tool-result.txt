@@ -1,0 +1,8 @@
+Tool '{ToolName}' returned: {ToolResult}
+
+Based on this result, you can either:
+1. Provide a final natural language response to the user
+2. Use another tool if you need more information
+
+If you need to use another tool, respond with the JSON format again.
+If you have enough information, provide a comprehensive response to the user.
