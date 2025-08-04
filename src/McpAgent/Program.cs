@@ -4,6 +4,7 @@ using McpAgent.Mcp;
 using McpAgent.Memory;
 using McpAgent.Providers;
 using McpAgent.Services;
+using McpAgent.Utils;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -69,6 +70,8 @@ var builder = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IConversationManager, InMemoryConversationManager>();
         services.AddSingleton<IPromptService, PromptService>();
         services.AddSingleton<IStreamingService, ConsoleStreamingService>();
+        services.AddSingleton<ISessionManager, SessionManager>();
+        services.AddSingleton<IHealthCheckService, HealthCheckService>();
         services.AddSingleton<IAgent, Agent>();
 
         services.AddHostedService<AgentHostedService>();

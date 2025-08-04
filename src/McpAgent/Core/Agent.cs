@@ -6,6 +6,7 @@ using McpAgent.Memory;
 using McpAgent.Models;
 using McpAgent.Providers;
 using McpAgent.Services;
+using McpAgent.Utils;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -20,6 +21,7 @@ public class Agent : IAgent
     private readonly IConversationManager _conversationManager;
     private readonly IPromptService _promptService;
     private readonly IStreamingService _streamingService;
+    private readonly ISessionManager _sessionManager;
 
     public Agent(
         ILogger<Agent> logger,
@@ -28,7 +30,8 @@ public class Agent : IAgent
         IMcpClient mcpClient,
         IConversationManager conversationManager,
         IPromptService promptService,
-        IStreamingService streamingService)
+        IStreamingService streamingService,
+        ISessionManager sessionManager)
     {
         _logger = logger;
         _config = options.Value;
@@ -37,6 +40,7 @@ public class Agent : IAgent
         _conversationManager = conversationManager;
         _promptService = promptService;
         _streamingService = streamingService;
+        _sessionManager = sessionManager;
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -66,12 +70,14 @@ public class Agent : IAgent
         }
     }
 
-    public async Task<AgentResponse> ProcessAsync(string input, CancellationToken cancellationToken = default)
+    public async Task<AgentResponse> ProcessAsync(string input, string? sessionId = null, CancellationToken cancellationToken = default)
     {
+        var conversationId = await _sessionManager.GetOrCreateSessionAsync(sessionId, cancellationToken);
+        
         var request = new AgentRequest
         {
             Message = input,
-            ConversationId = await _conversationManager.CreateConversationAsync(cancellationToken)
+            ConversationId = conversationId
         };
 
         return await ProcessAsync(request, cancellationToken);
@@ -89,8 +95,10 @@ public class Agent : IAgent
             var availableTools = await _mcpClient.GetAvailableToolsAsync(cancellationToken);
 
             var systemPrompt = BuildSystemPrompt();
+            var contextualPrompt = BuildContextualPrompt(systemPrompt, request.Message, history);
+            
             var response = await _llmProvider.GenerateResponseAsync(
-                $"{systemPrompt}\n\nUser: {request.Message}",
+                contextualPrompt,
                 history,
                 availableTools,
                 cancellationToken);
@@ -412,5 +420,86 @@ Use EXACT tool names and include ALL required parameters.";
         };
         
         await _conversationManager.AddMessageAsync(conversationId, assistantMessage, cancellationToken);
+    }
+
+    private string BuildContextualPrompt(string systemPrompt, string currentMessage, List<ConversationMessage> history)
+    {
+        var contextBuilder = new StringBuilder();
+        contextBuilder.AppendLine(systemPrompt);
+        contextBuilder.AppendLine();
+
+        // Include conversation history for context, but manage token limits
+        var maxHistoryTokens = _config.Llm.MaxHistoryTokens;
+        var historyToInclude = GetRelevantHistory(history, maxHistoryTokens);
+
+        if (historyToInclude.Count > 0)
+        {
+            contextBuilder.AppendLine("Previous conversation:");
+            foreach (var message in historyToInclude)
+            {
+                if (message.Role == "tool")
+                {
+                    // Summarize tool calls to save tokens
+                    var toolSummary = SummarizeToolCall(message.Content);
+                    contextBuilder.AppendLine($"[Tool used: {toolSummary}]");
+                }
+                else
+                {
+                    contextBuilder.AppendLine($"{char.ToUpper(message.Role[0])}{message.Role.Substring(1)}: {message.Content}");
+                }
+            }
+            contextBuilder.AppendLine();
+        }
+
+        contextBuilder.AppendLine($"User: {currentMessage}");
+        
+        return contextBuilder.ToString();
+    }
+
+    private List<ConversationMessage> GetRelevantHistory(List<ConversationMessage> history, int maxTokens)
+    {
+        if (history.Count == 0) return new List<ConversationMessage>();
+
+        var relevantHistory = new List<ConversationMessage>();
+        var currentTokens = 0;
+
+        // Start from most recent and work backwards
+        for (int i = history.Count - 1; i >= 0; i--)
+        {
+            var message = history[i];
+            var messageTokens = TokenCounter.CountTokens(message.Content);
+            
+            if (currentTokens + messageTokens > maxTokens && relevantHistory.Count > 0)
+            {
+                break; // Stop if adding this message would exceed token limit
+            }
+
+            relevantHistory.Insert(0, message);
+            currentTokens += messageTokens;
+        }
+
+        return relevantHistory;
+    }
+
+    private string SummarizeToolCall(string toolCallContent)
+    {
+        try
+        {
+            // Extract tool name from the tool call content
+            if (toolCallContent.StartsWith("Tool: "))
+            {
+                var lines = toolCallContent.Split('\n');
+                var toolLine = lines.FirstOrDefault(l => l.StartsWith("Tool: "));
+                if (toolLine != null)
+                {
+                    return toolLine.Substring(6); // Remove "Tool: " prefix
+                }
+            }
+            return "unknown tool";
+        }
+        catch
+        {
+            return "tool call";
+        }
     }
 }

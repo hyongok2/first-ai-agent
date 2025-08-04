@@ -1,13 +1,20 @@
 using System.Text;
+using Microsoft.Extensions.Logging;
 
 namespace McpAgent.Utils;
 
-public static class TokenCounter
+public class TokenCounter
 {
     private const double TokensPerWord = 1.3; // Approximate for most models
     private const double TokensPerCharacter = 0.25; // Approximate for Asian languages
+    private readonly ILogger<TokenCounter> _logger;
     
-    public static int EstimateTokens(string text)
+    public TokenCounter(ILogger<TokenCounter> logger)
+    {
+        _logger = logger;
+    }
+    
+    public static int CountTokens(string text)
     {
         if (string.IsNullOrEmpty(text))
             return 0;
@@ -31,9 +38,9 @@ public static class TokenCounter
         }
     }
     
-    public static bool WouldExceedLimit(List<string> texts, int maxTokens)
+    public bool WouldExceedLimit(List<string> texts, int maxTokens)
     {
-        var totalTokens = texts.Sum(EstimateTokens);
+        var totalTokens = texts.Sum(CountTokens);
         return totalTokens > maxTokens;
     }
     
@@ -45,7 +52,7 @@ public static class TokenCounter
         for (int i = texts.Count - 1; i >= 0; i--)
         {
             var text = texts[i];
-            var textTokens = EstimateTokens(text);
+            var textTokens = CountTokens(text);
             if (currentTokens + textTokens <= maxTokens)
             {
                 result.Insert(0, text);
@@ -59,6 +66,8 @@ public static class TokenCounter
         
         return result;
     }
+    
+    public static int EstimateTokens(string text) => CountTokens(text);
     
     private static int CountEnglishCharacters(string text)
     {

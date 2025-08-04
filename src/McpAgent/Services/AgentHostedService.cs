@@ -1,5 +1,6 @@
 using McpAgent.Core;
 using McpAgent.Common;
+using McpAgent.Mcp;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -10,12 +11,25 @@ public class AgentHostedService : BackgroundService
     private readonly ILogger<AgentHostedService> _logger;
     private readonly IAgent _agent;
     private readonly IStreamingService _streamingService;
+    private readonly ISessionManager _sessionManager;
+    private readonly IMcpClient _mcpClient;
+    private readonly IHealthCheckService _healthCheckService;
+    private string? _currentSessionId;
 
-    public AgentHostedService(ILogger<AgentHostedService> logger, IAgent agent, IStreamingService streamingService)
+    public AgentHostedService(
+        ILogger<AgentHostedService> logger, 
+        IAgent agent, 
+        IStreamingService streamingService,
+        ISessionManager sessionManager,
+        IMcpClient mcpClient,
+        IHealthCheckService healthCheckService)
     {
         _logger = logger;
         _agent = agent;
         _streamingService = streamingService;
+        _sessionManager = sessionManager;
+        _mcpClient = mcpClient;
+        _healthCheckService = healthCheckService;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -24,8 +38,31 @@ public class AgentHostedService : BackgroundService
         {
             await _agent.InitializeAsync(stoppingToken);
             
+            // Perform health check
+            var healthCheck = await _healthCheckService.CheckOverallHealthAsync(stoppingToken);
+            if (!healthCheck.IsHealthy)
+            {
+                _logger.LogWarning("System health check failed: {Message}", healthCheck.Message);
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"⚠️  Warning: {healthCheck.Message}");
+                Console.ResetColor();
+            }
+            else
+            {
+                _logger.LogInformation("System health check passed");
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("✅ All systems ready");
+                Console.ResetColor();
+            }
+            
+            // Create initial session
+            _currentSessionId = await _sessionManager.GetOrCreateSessionAsync(cancellationToken: stoppingToken);
+            
             _logger.LogInformation("AI Agent started. Type 'quit' or 'exit' to stop.");
-            _logger.LogInformation("Starting interactive session...");
+            _logger.LogInformation("Starting interactive session with ID: {SessionId}", _currentSessionId);
+            
+            Console.WriteLine($"\n🤖 McpAgent ready! Session: {_currentSessionId[..8]}...");
+            Console.WriteLine("Type 'help' for commands or start chatting!");
 
             await RunInteractiveSessionAsync(stoppingToken);
         }
@@ -68,13 +105,27 @@ public class AgentHostedService : BackgroundService
                     await ShowAvailableToolsAsync(cancellationToken);
                     continue;
                 }
+                
+                if (input.Equals("status", StringComparison.OrdinalIgnoreCase))
+                {
+                    await ShowSystemStatusAsync(cancellationToken);
+                    continue;
+                }
+                
+                if (input.Equals("new", StringComparison.OrdinalIgnoreCase) ||
+                    input.Equals("reset", StringComparison.OrdinalIgnoreCase))
+                {
+                    _currentSessionId = await _sessionManager.GetOrCreateSessionAsync(cancellationToken: cancellationToken);
+                    Console.WriteLine($"🔄 Started new session: {_currentSessionId[..8]}...");
+                    continue;
+                }
 
                 Console.Write("Assistant: ");
                 
                 try
                 {
                     var response = await RetryHelper.RetryAsync(
-                        () => _agent.ProcessAsync(input, cancellationToken),
+                        () => _agent.ProcessAsync(input, _currentSessionId, cancellationToken),
                         maxAttempts: 2,
                         logger: _logger,
                         cancellationToken: cancellationToken);
@@ -128,10 +179,13 @@ public class AgentHostedService : BackgroundService
 Available commands:
 - help: Show this help message
 - tools: Show available MCP tools
+- status: Show system health status
+- new/reset: Start a new conversation session
 - quit/exit: Stop the agent
 - Any other message: Chat with the AI agent
 
 The agent has access to MCP tools and can help you with various tasks.
+Your current session preserves conversation history for context.
         ");
     }
 
@@ -142,20 +196,30 @@ The agent has access to MCP tools and can help you with various tasks.
             Console.WriteLine("\n🔧 Available MCP Tools:");
             Console.WriteLine("=======================================================");
             
-            // This would need to be implemented in the agent
-            // For now, show a placeholder
-            Console.WriteLine("📁 File Operations:");
-            Console.WriteLine("  • list_directory - List files and folders");
-            Console.WriteLine("  • read_file - Read file contents");
-            Console.WriteLine("  • write_file - Create or modify files");
+            var tools = await _mcpClient.GetAvailableToolsAsync(cancellationToken);
+            var connectedServers = await _mcpClient.GetConnectedServersAsync();
             
-            Console.WriteLine("\n🌐 Web Operations:");
-            Console.WriteLine("  • fetch_url - Retrieve web content");
-            Console.WriteLine("  • send_request - Make HTTP requests");
-            
-            Console.WriteLine("\n⚙️ System Operations:");
-            Console.WriteLine("  • run_command - Execute system commands");
-            Console.WriteLine("  • get_system_info - Get system information");
+            if (tools.Count == 0)
+            {
+                Console.WriteLine("No tools are currently available.");
+                if (connectedServers.Count == 0)
+                {
+                    Console.WriteLine("No MCP servers are connected.");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"Found {tools.Count} tools from {connectedServers.Count} server(s):\n");
+                
+                foreach (var tool in tools)
+                {
+                    Console.WriteLine($"• {tool.Name}");
+                    if (!string.IsNullOrEmpty(tool.Description))
+                    {
+                        Console.WriteLine($"  {tool.Description}");
+                    }
+                }
+            }
             
             Console.WriteLine("=======================================================");
         }
@@ -163,6 +227,50 @@ The agent has access to MCP tools and can help you with various tasks.
         {
             _logger.LogError(ex, "Error showing available tools");
             Console.WriteLine("Unable to retrieve tool information at this time.");
+        }
+    }
+    
+    private async Task ShowSystemStatusAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            Console.WriteLine("\n📊 System Status:");
+            Console.WriteLine("=======================================================");
+            
+            var healthCheck = await _healthCheckService.CheckOverallHealthAsync(cancellationToken);
+            
+            if (healthCheck.IsHealthy)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("✅ Overall Status: Healthy");
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("❌ Overall Status: Unhealthy");
+            }
+            Console.ResetColor();
+            
+            if (healthCheck.Details.TryGetValue("llm", out var llmHealth) && llmHealth is HealthCheckResult llm)
+            {
+                Console.WriteLine($"\n🧠 LLM Provider: {(llm.IsHealthy ? "✅" : "❌")} {llm.Message}");
+            }
+            
+            if (healthCheck.Details.TryGetValue("mcp", out var mcpHealth) && mcpHealth is HealthCheckResult mcp)
+            {
+                Console.WriteLine($"🔌 MCP Servers: {(mcp.IsHealthy ? "✅" : "❌")} {mcp.Message}");
+            }
+            
+            var activeSessions = await _sessionManager.GetActiveSessionsAsync(cancellationToken);
+            Console.WriteLine($"💬 Active Sessions: {activeSessions.Count}");
+            Console.WriteLine($"🆔 Current Session: {_currentSessionId?[..8]}...");
+            
+            Console.WriteLine("=======================================================");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error showing system status");
+            Console.WriteLine("Unable to retrieve system status at this time.");
         }
     }
 }

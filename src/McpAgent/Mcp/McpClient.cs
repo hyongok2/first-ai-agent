@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
+using McpAgent.Common;
 using McpAgent.Configuration;
 using McpAgent.Models;
 using McpAgent.Providers;
@@ -13,11 +15,15 @@ public class McpClient : IMcpClient
     private readonly ILogger<McpClient> _logger;
     private readonly McpConfiguration _config;
     private readonly Dictionary<string, McpServerConnection> _connections = new();
+    private readonly Timer? _healthCheckTimer;
 
     public McpClient(ILogger<McpClient> logger, IOptions<AgentConfiguration> options)
     {
         _logger = logger;
         _config = options.Value.Mcp;
+        
+        // Start health check timer (every 30 seconds)
+        _healthCheckTimer = new Timer(PerformHealthCheck, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -149,8 +155,45 @@ public class McpClient : IMcpClient
 
     public async Task ShutdownAsync(CancellationToken cancellationToken = default)
     {
+        _healthCheckTimer?.Dispose();
         var disconnectTasks = _connections.Keys.Select(serverName => DisconnectAsync(serverName, cancellationToken));
         await Task.WhenAll(disconnectTasks);
+    }
+
+    private async void PerformHealthCheck(object? state)
+    {
+        var deadConnections = new List<string>();
+        
+        foreach (var kvp in _connections.ToList())
+        {
+            try
+            {
+                if (!await kvp.Value.IsHealthyAsync())
+                {
+                    _logger.LogWarning("MCP server {ServerName} is unhealthy, attempting reconnection", kvp.Key);
+                    deadConnections.Add(kvp.Key);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Health check failed for MCP server {ServerName}", kvp.Key);
+                deadConnections.Add(kvp.Key);
+            }
+        }
+
+        // Attempt to reconnect dead connections
+        foreach (var serverName in deadConnections)
+        {
+            try
+            {
+                await DisconnectAsync(serverName);
+                await ConnectAsync(serverName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to reconnect to MCP server {ServerName}", serverName);
+            }
+        }
     }
 }
 
@@ -160,6 +203,10 @@ internal class McpServerConnection : IAsyncDisposable
     private readonly Process _process;
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _requestSemaphore = new(1, 1);
+    private readonly object _responseLock = new();
+    private readonly Queue<string> _responseBuffer = new();
+    private readonly Task _responseReaderTask;
+    private readonly CancellationTokenSource _readerCancellation = new();
 
     public string ServerName => _serverName;
 
@@ -168,6 +215,9 @@ internal class McpServerConnection : IAsyncDisposable
         _serverName = serverName;
         _process = process;
         _logger = logger;
+        
+        // Start background task to read responses
+        _responseReaderTask = Task.Run(ReadResponsesAsync, _readerCancellation.Token);
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -230,11 +280,12 @@ internal class McpServerConnection : IAsyncDisposable
             var json = JsonSerializer.Serialize(request);
             _logger.LogDebug("Sending MCP request to {ServerName}: {Json}", _serverName, json);
             
-            // MCP 서버는 별도 프로세스의 stdin/stdout 사용 (콘솔과 분리됨)
+            // Send request
             await _process.StandardInput.WriteLineAsync(json);
             await _process.StandardInput.FlushAsync();
 
-            var response = await _process.StandardOutput.ReadLineAsync();
+            // Wait for response with timeout
+            var response = await WaitForResponseAsync(TimeSpan.FromSeconds(30), cancellationToken);
             if (response != null)
             {
                 _logger.LogDebug("Received MCP response from {ServerName}: {Response}", _serverName, response);
@@ -252,6 +303,83 @@ internal class McpServerConnection : IAsyncDisposable
         finally
         {
             _requestSemaphore.Release();
+        }
+    }
+
+    private async Task<string?> WaitForResponseAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow.Add(timeout);
+        
+        while (DateTime.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
+        {
+            lock (_responseLock)
+            {
+                if (_responseBuffer.Count > 0)
+                {
+                    return _responseBuffer.Dequeue();
+                }
+            }
+            
+            await Task.Delay(10, cancellationToken); // Small delay to prevent tight loop
+        }
+        
+        return null;
+    }
+
+    private async Task ReadResponsesAsync()
+    {
+        try
+        {
+            var buffer = new StringBuilder();
+            var reader = _process.StandardOutput;
+            
+            while (!_readerCancellation.IsCancellationRequested && !_process.HasExited)
+            {
+                var line = await reader.ReadLineAsync();
+                if (line == null) break;
+                
+                buffer.AppendLine(line);
+                
+                // Try to parse as complete JSON response
+                var content = buffer.ToString().Trim();
+                if (IsCompleteJsonResponse(content))
+                {
+                    lock (_responseLock)
+                    {
+                        _responseBuffer.Enqueue(content);
+                    }
+                    buffer.Clear();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reading responses from MCP server {ServerName}", _serverName);
+        }
+    }
+
+    private bool IsCompleteJsonResponse(string content)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(content);
+            return doc.RootElement.TryGetProperty("jsonrpc", out _);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<bool> IsHealthyAsync()
+    {
+        try
+        {
+            return !_process.HasExited && _process.Responding;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -290,6 +418,17 @@ internal class McpServerConnection : IAsyncDisposable
     {
         try
         {
+            _readerCancellation.Cancel();
+            
+            try
+            {
+                await _responseReaderTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when cancelling
+            }
+            
             if (!_process.HasExited)
             {
                 _process.Kill();
@@ -304,6 +443,7 @@ internal class McpServerConnection : IAsyncDisposable
         finally
         {
             _requestSemaphore.Dispose();
+            _readerCancellation.Dispose();
         }
     }
 }
