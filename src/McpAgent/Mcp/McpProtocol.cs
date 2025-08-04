@@ -4,7 +4,7 @@ namespace McpAgent.Mcp;
 
 public static class McpProtocol
 {
-    public const string ProtocolVersion = "2024-11-05";
+    public const string ProtocolVersion = "2025-06-18";
     
     public static class Methods
     {
