@@ -103,13 +103,53 @@ public class ConversationOrchestrator
             phase, state.ConversationId);
             
         var startTime = DateTime.UtcNow;
-        var result = await executor.ExecuteAsync(state, userInput);
-        var duration = DateTime.UtcNow - startTime;
         
-        _logger.LogDebug("Phase {Phase} completed in {Duration}ms with status {Status}", 
-            phase, duration.TotalMilliseconds, result.Status);
+        try
+        {
+            // Add timeout per phase (60 seconds)
+            using var phaseCts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            var result = await executor.ExecuteAsync(state, userInput, phaseCts.Token);
+            var duration = DateTime.UtcNow - startTime;
             
-        return result;
+            _logger.LogDebug("Phase {Phase} completed in {Duration}ms with status {Status}", 
+                phase, duration.TotalMilliseconds, result.Status);
+                
+            return result;
+        }
+        catch (OperationCanceledException ex)
+        {
+            var duration = DateTime.UtcNow - startTime;
+            _logger.LogError("Phase {Phase} timed out after {Duration}ms", phase, duration.TotalMilliseconds);
+            
+            return new PhaseResult
+            {
+                Phase = phase,
+                Status = ExecutionStatus.Failure,
+                ErrorMessage = "Phase execution timed out",
+                Data = new Dictionary<string, object> 
+                { 
+                    ["timeout"] = true,
+                    ["duration_ms"] = duration.TotalMilliseconds
+                }
+            };
+        }
+        catch (Exception ex)
+        {
+            var duration = DateTime.UtcNow - startTime;
+            _logger.LogError(ex, "Phase {Phase} failed after {Duration}ms", phase, duration.TotalMilliseconds);
+            
+            return new PhaseResult
+            {
+                Phase = phase,
+                Status = ExecutionStatus.Failure,
+                ErrorMessage = ex.Message,
+                Data = new Dictionary<string, object> 
+                { 
+                    ["error_type"] = ex.GetType().Name,
+                    ["duration_ms"] = duration.TotalMilliseconds
+                }
+            };
+        }
     }
     
     private void UpdateUserContext(ConversationState state, string userInput)

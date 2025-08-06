@@ -418,23 +418,60 @@ internal class McpServerConnection : IAsyncDisposable
     {
         try
         {
+            _logger.LogDebug("Starting graceful shutdown of MCP server {ServerName}", _serverName);
+            
+            // Cancel the response reader
             _readerCancellation.Cancel();
             
             try
             {
-                await _responseReaderTask;
+                await _responseReaderTask.WaitAsync(TimeSpan.FromSeconds(2));
             }
             catch (OperationCanceledException)
             {
                 // Expected when cancelling
             }
+            catch (TimeoutException)
+            {
+                _logger.LogWarning("Response reader task for {ServerName} did not complete within timeout", _serverName);
+            }
             
+            // Attempt graceful shutdown first
             if (!_process.HasExited)
             {
-                _process.Kill();
-                await _process.WaitForExitAsync();
+                try
+                {
+                    // Close stdin to signal the server to shutdown gracefully
+                    _process.StandardInput.Close();
+                    
+                    // Wait for graceful exit with timeout
+                    var gracefulExitTask = _process.WaitForExitAsync();
+                    using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                    
+                    try
+                    {
+                        await gracefulExitTask.WaitAsync(timeoutCts.Token);
+                        _logger.LogDebug("MCP server {ServerName} exited gracefully", _serverName);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        _logger.LogWarning("MCP server {ServerName} did not exit gracefully within timeout, forcing termination", _serverName);
+                        await ForceTerminateProcess();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to gracefully shutdown MCP server {ServerName}, forcing termination", _serverName);
+                    await ForceTerminateProcess();
+                }
             }
+            else
+            {
+                _logger.LogDebug("MCP server {ServerName} already exited", _serverName);
+            }
+            
             _process.Dispose();
+            _logger.LogInformation("MCP server {ServerName} shutdown completed", _serverName);
         }
         catch (Exception ex)
         {
@@ -444,6 +481,111 @@ internal class McpServerConnection : IAsyncDisposable
         {
             _requestSemaphore.Dispose();
             _readerCancellation.Dispose();
+        }
+    }
+
+    private async Task ForceTerminateProcess()
+    {
+        try
+        {
+            if (!_process.HasExited)
+            {
+                // Kill the entire process tree to ensure all child processes are terminated
+                await KillProcessTree(_process.Id);
+                
+                // Wait for the process to actually exit
+                if (!_process.WaitForExit(2000)) // 2 second timeout
+                {
+                    _logger.LogError("Failed to terminate MCP server {ServerName} within timeout", _serverName);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error force terminating MCP server {ServerName}", _serverName);
+        }
+    }
+
+    private async Task KillProcessTree(int processId)
+    {
+        try
+        {
+            // Use taskkill on Windows to kill the process tree
+            if (OperatingSystem.IsWindows())
+            {
+                var killProcess = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "taskkill",
+                        Arguments = $"/F /T /PID {processId}",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    }
+                };
+                
+                killProcess.Start();
+                await killProcess.WaitForExitAsync();
+                
+                if (killProcess.ExitCode == 0)
+                {
+                    _logger.LogDebug("Successfully killed process tree for PID {ProcessId}", processId);
+                }
+                else
+                {
+                    _logger.LogWarning("taskkill returned exit code {ExitCode} for PID {ProcessId}", killProcess.ExitCode, processId);
+                }
+            }
+            else
+            {
+                // Use kill on Unix-like systems
+                var killProcess = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "kill",
+                        Arguments = $"-TERM -{processId}", // Kill process group
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    }
+                };
+                
+                killProcess.Start();
+                await killProcess.WaitForExitAsync();
+                
+                // If TERM doesn't work, use KILL
+                if (!_process.HasExited)
+                {
+                    await Task.Delay(1000); // Give it a moment
+                    if (!_process.HasExited)
+                    {
+                        var forceKillProcess = new Process
+                        {
+                            StartInfo = new ProcessStartInfo
+                            {
+                                FileName = "kill",
+                                Arguments = $"-KILL -{processId}",
+                                UseShellExecute = false,
+                                CreateNoWindow = true
+                            }
+                        };
+                        
+                        forceKillProcess.Start();
+                        await forceKillProcess.WaitForExitAsync();
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error killing process tree for PID {ProcessId}", processId);
+            // Fallback to simple Kill() if process tree kill fails
+            if (!_process.HasExited)
+            {
+                _process.Kill();
+            }
         }
     }
 }

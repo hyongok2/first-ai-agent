@@ -34,7 +34,7 @@ public class IntentAnalysisExecutor : IPhaseExecutor
             var prompt = BuildIntentAnalysisPrompt(systemContext, userInput, chatSummary);
             
             _logger.LogDebug("Phase 1: Analyzing user intent");
-            var response = await _llm.GenerateResponseAsync(prompt, [], [], cancellationToken);
+            var response = await _llm.GenerateResponseAsync(prompt, [], cancellationToken);
             
             var parsed = ParseIntentResponse(response);
             

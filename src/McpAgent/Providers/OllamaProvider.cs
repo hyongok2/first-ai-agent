@@ -40,8 +40,27 @@ public class OllamaProvider : ILlmProvider
         try
         {
             var fullPrompt = BuildPrompt(prompt, history);
-            var response = await _kernel.InvokePromptAsync(fullPrompt, cancellationToken: cancellationToken);
-            return response.GetValue<string>() ?? string.Empty;
+            _logger.LogDebug("Invoking LLM with prompt length: {Length} characters", fullPrompt.Length);
+            
+            // Create a timeout cancellation token (30 seconds)
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(30));
+            
+            var response = await _kernel.InvokePromptAsync(fullPrompt, cancellationToken: timeoutCts.Token);
+            var result = response.GetValue<string>() ?? string.Empty;
+            
+            _logger.LogDebug("LLM response received, length: {Length} characters", result.Length);
+            return result;
+        }
+        catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning("LLM request was cancelled by user");
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogError("LLM request timed out after 30 seconds");
+            throw new TimeoutException("LLM request timed out after 30 seconds", ex);
         }
         catch (Exception ex)
         {
@@ -60,9 +79,27 @@ public class OllamaProvider : ILlmProvider
         {
             var toolsPrompt = BuildToolsPrompt(availableTools);
             var fullPrompt = BuildPrompt($"{toolsPrompt}\n\n{prompt}", history);
+            _logger.LogDebug("Invoking LLM with tools, prompt length: {Length} characters", fullPrompt.Length);
             
-            var response = await _kernel.InvokePromptAsync(fullPrompt, cancellationToken: cancellationToken);
-            return response.GetValue<string>() ?? string.Empty;
+            // Create a timeout cancellation token (30 seconds)
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(30));
+            
+            var response = await _kernel.InvokePromptAsync(fullPrompt, cancellationToken: timeoutCts.Token);
+            var result = response.GetValue<string>() ?? string.Empty;
+            
+            _logger.LogDebug("LLM response with tools received, length: {Length} characters", result.Length);
+            return result;
+        }
+        catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning("LLM request with tools was cancelled by user");
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogError("LLM request with tools timed out after 30 seconds");
+            throw new TimeoutException("LLM request with tools timed out after 30 seconds", ex);
         }
         catch (Exception ex)
         {
@@ -75,7 +112,11 @@ public class OllamaProvider : ILlmProvider
     {
         try
         {
-            var response = await _kernel.InvokePromptAsync("test", cancellationToken: cancellationToken);
+            // Create a timeout cancellation token (10 seconds for health check)
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
+            
+            var response = await _kernel.InvokePromptAsync("test", cancellationToken: timeoutCts.Token);
             return response != null;
         }
         catch

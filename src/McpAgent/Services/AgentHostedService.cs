@@ -76,6 +76,25 @@ public class AgentHostedService : BackgroundService
         }
     }
 
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("AgentHostedService is stopping...");
+        
+        try
+        {
+            // Ensure agent is properly shut down
+            await _agent.ShutdownAsync(cancellationToken);
+            _logger.LogInformation("Agent shutdown completed");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during agent shutdown");
+        }
+        
+        await base.StopAsync(cancellationToken);
+        _logger.LogInformation("AgentHostedService stopped");
+    }
+
     private async Task RunInteractiveSessionAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)

@@ -79,7 +79,7 @@ public class ParameterGenerationExecutor : IPhaseExecutor
             var prompt = BuildParameterGenerationPrompt(systemContext, userInput, selectedTool, functionResult);
             
             _logger.LogDebug("Phase 3: Generating parameters for function {FunctionName}", primaryFunction);
-            var response = await _llm.GenerateResponseAsync(prompt, [], [], cancellationToken);
+            var response = await _llm.GenerateResponseAsync(prompt, [], cancellationToken);
             
             var parsed = ParseParameterResponse(response, selectedTool);
             

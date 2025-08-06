@@ -44,7 +44,7 @@ public class ResponseSynthesisExecutor : IPhaseExecutor
             var prompt = BuildResponseSynthesisPrompt(systemContext, userInput, state, executionResults);
             
             _logger.LogDebug("Phase 5: Synthesizing final response");
-            var response = await _llm.GenerateResponseAsync(prompt, [], [], cancellationToken);
+            var response = await _llm.GenerateResponseAsync(prompt, [], cancellationToken);
             
             var parsed = ParseResponseSynthesis(response);
             

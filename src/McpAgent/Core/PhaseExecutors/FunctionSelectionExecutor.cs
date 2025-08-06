@@ -43,7 +43,7 @@ public class FunctionSelectionExecutor : IPhaseExecutor
             var prompt = BuildFunctionSelectionPrompt(systemContext, intentResult, availableFunctions);
             
             _logger.LogDebug("Phase 2: Selecting appropriate function");
-            var response = await _llm.GenerateResponseAsync(prompt, [], [], cancellationToken);
+            var response = await _llm.GenerateResponseAsync(prompt, [], cancellationToken);
             
             var parsed = ParseFunctionResponse(response, availableFunctions);
             
