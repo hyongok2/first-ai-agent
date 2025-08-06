@@ -65,6 +65,7 @@ var builder = Host.CreateDefaultBuilder(args)
 
         services.AddHttpClient();
 
+        // Core services
         services.AddSingleton<ILlmProvider, OllamaProvider>();
         services.AddSingleton<IMcpClient, McpClient>();
         services.AddSingleton<IConversationManager, InMemoryConversationManager>();
@@ -74,6 +75,18 @@ var builder = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IHealthCheckService, HealthCheckService>();
         services.AddSingleton<IContextManager, ContextManager>();
         services.AddSingleton<TokenCounter>();
+
+        // Enhanced multi-phase system services
+        services.AddSingleton<ISystemContextProvider, SystemContextProvider>();
+        services.AddSingleton<IPerformanceCounterService, PerformanceCounterService>();
+        services.AddSingleton<ILocationService, PrivacyAwareLocationService>();
+        services.AddSingleton<IUserProfileService, UserProfileService>();
+        services.AddSingleton<IConversationStateManager, ConversationStateManager>();
+        services.AddSingleton<ErrorRecoveryManager>();
+        services.AddSingleton<IPhaseExecutorFactory, PhaseExecutorFactory>();
+        services.AddSingleton<ConversationOrchestrator>();
+
+        // Enhanced Agent
         services.AddSingleton<IAgent, Agent>();
 
         services.AddHostedService<AgentHostedService>();

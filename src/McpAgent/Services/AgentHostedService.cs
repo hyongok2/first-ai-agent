@@ -83,7 +83,26 @@ public class AgentHostedService : BackgroundService
             try
             {
                 Console.Write("\nYou: ");
-                var input = Console.ReadLine();
+                
+                // Read user input with cancellation token support
+                string? input;
+                try
+                {
+                    var inputTask = Task.Run(() => Console.ReadLine(), cancellationToken);
+                    input = await inputTask;
+                    
+                    // Check for null input which indicates EOF or stream closure
+                    if (input == null)
+                    {
+                        _logger.LogWarning("Console input stream closed, terminating session");
+                        break;
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // Application is shutting down
+                    break;
+                }
 
                 if (string.IsNullOrWhiteSpace(input))
                     continue;
