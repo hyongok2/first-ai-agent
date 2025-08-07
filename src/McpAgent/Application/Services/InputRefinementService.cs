@@ -1,25 +1,34 @@
-using System.Text.Json;
 using McpAgent.Domain.Entities;
 using McpAgent.Domain.Interfaces;
 using McpAgent.Application.Interfaces;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace McpAgent.Application.Services;
 
+/// <summary>
+/// LLM 기반 InputRefinementService - input-refinement.txt 프롬프트 사용
+/// </summary>
 public class InputRefinementService : IInputRefinementService
 {
-    private readonly ILlmProvider _llmProvider;
-    private readonly IPromptService _promptService;
     private readonly ILogger<InputRefinementService> _logger;
+    private readonly ILlmService _llmService;
+    private readonly IPromptService _promptService;
+    private readonly IRequestResponseLogger _requestResponseLogger;
+    private readonly IToolExecutor _toolExecutor;
 
     public InputRefinementService(
-        ILlmProvider llmProvider,
+        ILogger<InputRefinementService> logger, 
+        ILlmService llmService, 
         IPromptService promptService,
-        ILogger<InputRefinementService> logger)
+        IRequestResponseLogger requestResponseLogger,
+        IToolExecutor toolExecutor)
     {
-        _llmProvider = llmProvider;
-        _promptService = promptService;
         _logger = logger;
+        _llmService = llmService;
+        _promptService = promptService;
+        _requestResponseLogger = requestResponseLogger;
+        _toolExecutor = toolExecutor;
     }
 
     public async Task<RefinedInput> RefineInputAsync(
@@ -30,219 +39,223 @@ public class InputRefinementService : IInputRefinementService
     {
         try
         {
-            _logger.LogInformation("Starting input refinement for: {Input}", originalInput);
+            _logger.LogInformation("Refining input using LLM with input-refinement prompt: {Input}", originalInput);
 
-            // Load the input refinement prompt template
-            var promptTemplate = await _promptService.GetPromptAsync("input-refinement");
+            // input-refinement.txt 프롬프트 로드
+            var promptTemplate = await _promptService.GetPromptAsync("input-refinement", cancellationToken);
             
-            // Convert conversation history to string format
-            var conversationHistoryText = FormatConversationHistory(conversationHistory);
+            // 대화 이력 포맷팅
+            var historyText = FormatConversationHistory(conversationHistory);
+            var availableMcpToolsText = await GetAvailableMcpToolsDescriptionAsync(cancellationToken);
+            var availableCapabilitiesText = GetAvailableCapabilitiesDescription();
+            var currentTimeText = GetCurrentTimeInfo();
             
-            // Replace placeholders in the template
+            // 프롬프트 변수 치환
             var prompt = promptTemplate
-                .Replace("{SYSTEM_CONTEXT}", systemContext)
-                .Replace("{CONVERSATION_HISTORY}", conversationHistoryText)
+                .Replace("{SYSTEM_CONTEXT}", systemContext ?? "AI 에이전트")
+                .Replace("{CURRENT_TIME}", currentTimeText)
+                .Replace("{AVAILABLE_CAPABILITIES}", availableCapabilitiesText)
+                .Replace("{AVAILABLE_MCP_TOOLS}", availableMcpToolsText)
+                .Replace("{CONVERSATION_HISTORY}", historyText)
                 .Replace("{USER_INPUT}", originalInput);
 
-            // Call LLM to refine the input
-            var response = await _llmProvider.GenerateResponseAsync(prompt, cancellationToken);
+            // LLM 호출 (input-refinement 단계)
+            var response = await _llmService.GenerateResponseAsync(prompt, conversationHistory, cancellationToken);
             
-            // Parse the JSON response
-            var refinementResult = ParseRefinementResult(response);
+            // LLM 요청/응답 로깅
+            _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
+                "qwen3:32b", "InputRefinement", prompt, response, cancellationToken));
             
-            _logger.LogInformation("Input refinement completed successfully");
+            _logger.LogDebug("Input refinement LLM response: {Response}", response);
+
+            // JSON 응답 파싱
+            var refinementResult = ParseRefinementResponse(response);
             
-            return refinementResult;
+            if (refinementResult != null)
+            {
+                _logger.LogInformation("Input refined successfully with confidence: {Confidence}", refinementResult.IntentConfidence);
+                return refinementResult;
+            }
+            else
+            {
+                _logger.LogWarning("Failed to parse LLM response, falling back to simple analysis");
+                return CreateFallbackRefinement(originalInput);
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to refine input: {Input}", originalInput);
-            
-            // Return fallback refined input on error
-            return CreateFallbackRefinedInput(originalInput);
+            _logger.LogError(ex, "Failed to refine input using LLM: {Input}", originalInput);
+            return CreateFallbackRefinement(originalInput);
         }
     }
 
-    private RefinedInput ParseRefinementResult(string response)
+    private string FormatConversationHistory(IReadOnlyList<ConversationMessage> history)
+    {
+        if (history == null || history.Count == 0)
+            return "이전 대화 없음";
+
+        var historyText = string.Join("\n", history.Select(m => $"{m.Role}: {m.Content}"));
+        return historyText;
+    }
+
+    private RefinedInput? ParseRefinementResponse(string response)
     {
         try
         {
-            // Extract JSON from response if it's wrapped in markdown
-            var jsonResponse = ExtractJsonFromResponse(response);
+            // JSON 코드 블록에서 JSON 추출
+            var jsonStart = response.IndexOf('{');
+            var jsonEnd = response.LastIndexOf('}');
             
-            var jsonDocument = JsonDocument.Parse(jsonResponse);
-            var root = jsonDocument.RootElement;
-
-            var originalInput = root.TryGetProperty("original_input", out var origInput) 
-                ? origInput.GetString() ?? "" : "";
-            var clarifiedIntent = root.TryGetProperty("clarified_intent", out var intent) 
-                ? intent.GetString() ?? "" : "";
-            var refinedQuery = root.TryGetProperty("refined_query", out var query) 
-                ? query.GetString() ?? "" : "";
-            var extractedEntities = ParseEntities(root);
-            var context = ParseContext(root);
-            var confidenceLevel = DetermineConfidenceLevel(root);
-
-            return new RefinedInput(
-                originalInput,
-                clarifiedIntent,
-                refinedQuery,
-                extractedEntities, // List<string>
-                context,
-                null, // suggestedPlan
-                confidenceLevel
-            );
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogError(ex, "Failed to parse refinement result JSON: {Response}", response);
-            throw new InvalidOperationException("Failed to parse LLM response as JSON", ex);
-        }
-    }
-
-    private List<string> ParseEntities(JsonElement root)
-    {
-        var entities = new List<string>();
-        
-        if (root.TryGetProperty("extracted_entities", out var entitiesElement))
-        {
-            if (entitiesElement.ValueKind == JsonValueKind.Array)
+            if (jsonStart >= 0 && jsonEnd > jsonStart)
             {
-                foreach (var item in entitiesElement.EnumerateArray())
+                var jsonContent = response.Substring(jsonStart, jsonEnd - jsonStart + 1);
+                
+                var jsonDoc = JsonDocument.Parse(jsonContent);
+                var root = jsonDoc.RootElement;
+
+                var clarifiedIntent = root.GetProperty("clarified_intent").GetString() ?? "";
+                var refinedQuery = root.GetProperty("refined_query").GetString() ?? "";
+                
+                var entities = new List<string>();
+                if (root.TryGetProperty("extracted_entities", out var entitiesElement))
                 {
-                    var entity = item.GetString();
-                    if (!string.IsNullOrEmpty(entity))
+                    foreach (var entity in entitiesElement.EnumerateArray())
                     {
-                        entities.Add(entity);
+                        if (entity.GetString() is string entityStr)
+                            entities.Add(entityStr);
                     }
                 }
-            }
-            else if (entitiesElement.ValueKind == JsonValueKind.Object)
-            {
-                // If it's an object, treat property names as entities
-                foreach (var property in entitiesElement.EnumerateObject())
+
+                var context = new Dictionary<string, object>();
+                if (root.TryGetProperty("context", out var contextElement))
                 {
-                    entities.Add(property.Name);
+                    foreach (var prop in contextElement.EnumerateObject())
+                    {
+                        context[prop.Name] = prop.Value.ToString();
+                    }
                 }
+
+                var suggestedPlan = root.TryGetProperty("suggested_plan", out var planElement) 
+                    ? planElement.GetString() 
+                    : null;
+
+                var confidenceLevelStr = root.TryGetProperty("confidence_level", out var confidenceElement)
+                    ? confidenceElement.GetString()
+                    : "Medium";
+
+                var confidenceLevel = Enum.TryParse<ConfidenceLevel>(confidenceLevelStr, out var parsedLevel)
+                    ? parsedLevel 
+                    : ConfidenceLevel.Medium;
+
+                return new RefinedInput(
+                    refinedQuery,
+                    clarifiedIntent,
+                    refinedQuery,
+                    entities,
+                    context,
+                    suggestedPlan,
+                    confidenceLevel
+                );
             }
         }
-        
-        return entities;
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to parse refinement response JSON: {Response}", response);
+        }
+
+        return null;
     }
 
-    private List<string> ParseFollowUpQuestions(JsonElement root)
+    private RefinedInput CreateFallbackRefinement(string originalInput)
     {
-        var questions = new List<string>();
-        
-        if (root.TryGetProperty("follow_up_questions", out var questionsElement) &&
-            questionsElement.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var question in questionsElement.EnumerateArray())
-            {
-                var questionText = question.GetString();
-                if (!string.IsNullOrEmpty(questionText))
-                {
-                    questions.Add(questionText);
-                }
-            }
-        }
-        
-        return questions;
-    }
-
-    private string ExtractJsonFromResponse(string response)
-    {
-        // Remove markdown code blocks if present
-        var lines = response.Split('\n');
-        var jsonStartIndex = -1;
-        var jsonEndIndex = -1;
-
-        for (int i = 0; i < lines.Length; i++)
-        {
-            if (lines[i].Trim().StartsWith("```json"))
-            {
-                jsonStartIndex = i + 1;
-            }
-            else if (lines[i].Trim() == "```" && jsonStartIndex != -1)
-            {
-                jsonEndIndex = i;
-                break;
-            }
-        }
-
-        if (jsonStartIndex != -1 && jsonEndIndex != -1)
-        {
-            return string.Join('\n', lines[jsonStartIndex..jsonEndIndex]);
-        }
-
-        // If no markdown blocks found, assume entire response is JSON
-        return response.Trim();
-    }
-
-    private RefinedInput CreateFallbackRefinedInput(string originalInput)
-    {
-        _logger.LogWarning("Creating fallback refined input for: {Input}", originalInput);
-        
         return new RefinedInput(
             originalInput,
-            originalInput, // Use original as clarified intent for fallback
-            originalInput, // Use original as refined query for fallback
-            new List<string>(), // Empty extracted entities
-            new Dictionary<string, object>(), // Empty context
-            "요청을 더 구체적으로 설명해 주세요", // Suggested plan
-            ConfidenceLevel.Low // Low confidence for fallback
+            "사용자 요청",
+            originalInput,
+            new List<string>(),
+            new Dictionary<string, object>(),
+            null,
+            ConfidenceLevel.Medium
         );
     }
 
-    private Dictionary<string, object> ParseContext(JsonElement root)
+    private string GetCurrentTimeInfo()
     {
-        var context = new Dictionary<string, object>();
-        if (root.TryGetProperty("context", out var contextElement))
+        var now = DateTime.Now;
+        var utcNow = DateTime.UtcNow;
+        
+        return $@"현재 시간: {now:yyyy-MM-dd HH:mm:ss} (현지 시간)
+UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
+요일: {now.DayOfWeek switch 
+{
+    DayOfWeek.Monday => "월요일",
+    DayOfWeek.Tuesday => "화요일", 
+    DayOfWeek.Wednesday => "수요일",
+    DayOfWeek.Thursday => "목요일",
+    DayOfWeek.Friday => "금요일",
+    DayOfWeek.Saturday => "토요일",
+    DayOfWeek.Sunday => "일요일",
+    _ => now.DayOfWeek.ToString()
+}}
+타임존: {TimeZoneInfo.Local.DisplayName}";
+    }
+
+    private string GetAvailableCapabilitiesDescription()
+    {
+        return @"
+1. **IntentClarification** - 사용자 의도가 불분명하여 명확화가 필요한 경우
+   - 사용 시기: 요청이 모호하거나 추가 정보가 필요할 때
+   - 예시: 불완전한 질문, 컨텍스트가 부족한 요청
+
+2. **SimpleChat** - 일반적인 대화 응답 (도구 사용 없음)
+   - 사용 시기: 인사, 감사, 일반 질문 등 간단한 대화
+   - 예시: '안녕하세요', '고마워요', '날씨가 어때요?'
+
+3. **TaskCompletion** - 사용자 요청이 완료되어 최종 응답하는 경우
+   - 사용 시기: 이전 단계에서 충분한 정보를 수집한 후 최종 답변
+   - 예시: 질문에 대한 완전한 답변, 작업 완료 보고
+
+4. **InternalTool** - 내부 시스템 도구 사용 (현재 사용 불가)
+   - 상태: 비활성화됨
+
+5. **McpTool** - MCP 외부 도구 사용
+   - 사용 시기: 파일 시스템, 웹 검색, API 호출 등 외부 도구가 필요할 때
+   - 예시: 파일 읽기/쓰기, 웹 페이지 검색, 데이터베이스 조회
+
+6. **TaskPlanning** - 복잡한 작업을 위한 계획 수립
+   - 사용 시기: 다단계 작업이나 복잡한 프로세스가 필요할 때
+   - 예시: 프로젝트 계획, 여러 단계의 분석 작업
+
+7. **ErrorHandling** - 오류 또는 예외 상황 처리
+   - 사용 시기: 이전 작업에서 오류가 발생했거나 예외 상황 처리가 필요할 때
+   - 예시: 도구 실행 실패, 잘못된 입력, 시스템 오류
+        ";
+    }
+
+    private async Task<string> GetAvailableMcpToolsDescriptionAsync(CancellationToken cancellationToken)
+    {
+        try
         {
-            foreach (var property in contextElement.EnumerateObject())
+            var availableTools = await _toolExecutor.GetAvailableToolsAsync(cancellationToken);
+            
+            if (availableTools == null || availableTools.Count == 0)
             {
-                var value = (object)(property.Value.ValueKind switch
-                {
-                    JsonValueKind.String => property.Value.GetString() ?? "",
-                    JsonValueKind.Number => property.Value.GetDouble(),
-                    JsonValueKind.True => true,
-                    JsonValueKind.False => false,
-                    _ => property.Value.GetRawText()
-                });
-                context[property.Name] = value;
+                return "현재 사용 가능한 MCP 도구가 없습니다.";
             }
-        }
-        return context;
-    }
 
-    private ConfidenceLevel DetermineConfidenceLevel(JsonElement root)
-    {
-        if (root.TryGetProperty("confidence_level", out var confidence))
+            var toolDescriptions = availableTools
+                .Select(tool => $"- **{tool.Name}**: {tool.Description}")
+                .ToList();
+
+            var header = $"=== 사용 가능한 MCP 도구 ({availableTools.Count}개) ===";
+            var toolList = string.Join('\n', toolDescriptions);
+            
+            return $"{header}\n{toolList}";
+        }
+        catch (Exception ex)
         {
-            var confidenceValue = confidence.GetDouble();
-            return confidenceValue switch
-            {
-                >= 0.8 => ConfidenceLevel.VeryHigh,
-                >= 0.6 => ConfidenceLevel.High,
-                >= 0.4 => ConfidenceLevel.Medium,
-                >= 0.2 => ConfidenceLevel.Low,
-                _ => ConfidenceLevel.VeryLow
-            };
+            _logger.LogWarning(ex, "Failed to get available MCP tools information");
+            return "MCP 도구 정보를 가져올 수 없습니다.";
         }
-        return ConfidenceLevel.Medium;
-    }
-
-    private string FormatConversationHistory(IReadOnlyList<ConversationMessage> conversationHistory)
-    {
-        if (conversationHistory == null || conversationHistory.Count == 0)
-        {
-            return "대화 이력이 없습니다.";
-        }
-
-        var history = conversationHistory
-            .Select(msg => $"{msg.Role}: {msg.Content}")
-            .ToList();
-
-        return string.Join('\n', history);
     }
 }

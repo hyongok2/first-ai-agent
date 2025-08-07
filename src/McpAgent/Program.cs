@@ -61,9 +61,9 @@ try
             services.AddSingleton<McpAgent.Domain.Services.AgentOrchestrator>();
 
             // Multi-Step Pipeline Services (using working fallback implementations)
-            services.AddSingleton<IInputRefinementService, InputRefinementServiceFallback>();
+            services.AddSingleton<IInputRefinementService, InputRefinementService>();
             services.AddSingleton<ICapabilitySelectionService, CapabilitySelectionService>();
-            services.AddSingleton<IConversationSummaryService, ConversationSummaryServiceFallback>();
+            services.AddSingleton<IConversationSummaryService, ConversationSummaryService>();
             services.AddSingleton<IParameterGenerationService, ParameterGenerationService>();
             services.AddSingleton<IResponseGenerationService, ResponseGenerationService>();
 
