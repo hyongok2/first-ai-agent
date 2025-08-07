@@ -6,7 +6,15 @@
       "Bash(dotnet build:*)",
       "Bash(findstr:*)",
       "Bash(grep:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(mkdir:*)",
+      "Bash(move Prompts Resources )",
+      "Bash(move Configuration ResourcesConfiguration)",
+      "Bash(mv:*)",
+      "Bash(cp:*)",
+      "Bash(rm:*)",
+      "Bash(find:*)",
+      "Bash(timeout:*)"
     ],
     "deny": []
   }

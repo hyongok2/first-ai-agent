@@ -22,13 +22,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="Prompts\**">
+      <None Include="Resources/Configuration/*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-  </ItemGroup>
-    <ItemGroup>
-      <None Include="appsettings.json">
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </None>
+    <None Include="Resources/Prompts/**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 </Project>
