@@ -29,6 +29,14 @@ public class ConversationOrchestrator
         var maxIterations = 30; // 전체 대화 최대 반복 (타임아웃 증가에 따라 조정)
         var iteration = 0;
         
+        // 이전 대화가 완료되었으면 새 대화를 위해 상태 초기화
+        if (state.IsConversationCompleted())
+        {
+            _logger.LogDebug("Previous conversation completed, preparing for new conversation in {ConversationId}", 
+                conversationId);
+            state.PrepareForNewConversation();
+        }
+        
         // 사용자 컨텍스트 업데이트
         UpdateUserContext(state, userInput);
         
@@ -38,8 +46,14 @@ public class ConversationOrchestrator
             
             try
             {
+                _logger.LogInformation("Executing phase {Phase} for conversation {ConversationId}", 
+                    state.CurrentPhase, conversationId);
+                    
                 var phaseResult = await ExecutePhaseAsync(state.CurrentPhase, state, userInput);
                 state.PhaseHistory[state.CurrentPhase] = phaseResult;
+                
+                _logger.LogInformation("Phase {Phase} completed with status {Status}, RequiresUserInput: {RequiresInput}", 
+                    state.CurrentPhase, phaseResult.Status, phaseResult.RequiresUserInput);
                 
                 // 루프 히스토리 업데이트
                 UpdateLoopHistory(state, phaseResult);
@@ -54,9 +68,13 @@ public class ConversationOrchestrator
                 // 다음 단계 결정
                 var nextPhase = state.GetNextPhase(state.CurrentPhase, phaseResult);
                 
+                _logger.LogInformation("Phase transition: {CurrentPhase} -> {NextPhase}", 
+                    state.CurrentPhase, nextPhase);
+                
                 // 사용자 입력이 필요한 경우
                 if (phaseResult.RequiresUserInput)
                 {
+                    _logger.LogInformation("User input required, returning interim response");
                     await _stateManager.SaveStateAsync(state);
                     return CreateInterimResponse(phaseResult, nextPhase, state);
                 }

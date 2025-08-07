@@ -89,10 +89,16 @@ public class ParameterGenerationExecutor : IPhaseExecutor
             
             var parsed = ParseParameterResponse(response, selectedTool);
             
+            _logger.LogInformation("Phase 3: Parameter generation completed. Confidence: {Confidence}, Tool calls: {ToolCallCount}, Missing info: {MissingCount}", 
+                parsed.ParameterConfidence, parsed.ToolCalls.Count, parsed.MissingInfo.Count);
+            
+            var status = parsed.ParameterConfidence >= 0.8 ? ExecutionStatus.Success : ExecutionStatus.RequiresInput;
+            _logger.LogInformation("Phase 3: Status determined as {Status}", status);
+            
             return new PhaseResult
             {
                 Phase = 3,
-                Status = parsed.ParameterConfidence >= 0.8 ? ExecutionStatus.Success : ExecutionStatus.RequiresInput,
+                Status = status,
                 Data = parsed.ToDictionary(),
                 ConfidenceScore = parsed.ParameterConfidence,
                 RequiresUserInput = parsed.MissingInfo.Any(),
@@ -255,7 +261,12 @@ Directory listing:
     {
         try
         {
+            _logger.LogDebug("Phase 3: Parsing parameter response for tool {ToolName}. Response length: {Length}", 
+                tool.Name, response.Length);
+                
             var cleanResponse = ExtractJsonFromResponse(response);
+            _logger.LogDebug("Phase 3: Extracted JSON: {Json}", cleanResponse);
+            
             var parsed = JsonSerializer.Deserialize<JsonElement>(cleanResponse);
             
             var result = new ParameterGenerationResult
@@ -279,7 +290,38 @@ Directory listing:
                     if (call.TryGetProperty("expected_output_type", out var outputType))
                         toolCall["expected_output_type"] = outputType.GetString() ?? "string";
                     if (call.TryGetProperty("parameters", out var parameters))
-                        toolCall["parameters"] = JsonSerializer.Deserialize<Dictionary<string, object>>(parameters.GetRawText()) ?? new();
+                    {
+                        try
+                        {
+                            // JsonElement를 Dictionary로 변환
+                            var paramsDict = new Dictionary<string, object>();
+                            if (parameters.ValueKind == JsonValueKind.Object)
+                            {
+                                foreach (var prop in parameters.EnumerateObject())
+                                {
+                                    paramsDict[prop.Name] = prop.Value.ValueKind switch
+                                    {
+                                        JsonValueKind.String => prop.Value.GetString() ?? "",
+                                        JsonValueKind.Number => prop.Value.GetDouble(),
+                                        JsonValueKind.True => true,
+                                        JsonValueKind.False => false,
+                                        JsonValueKind.Null => null,
+                                        _ => prop.Value.ToString()
+                                    };
+                                }
+                            }
+                            toolCall["parameters"] = paramsDict;
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to parse parameters for tool call, using empty dictionary");
+                            toolCall["parameters"] = new Dictionary<string, object>();
+                        }
+                    }
+                    else
+                    {
+                        toolCall["parameters"] = new Dictionary<string, object>();
+                    }
                     
                     result.ToolCalls.Add(toolCall);
                 }

@@ -275,7 +275,7 @@ internal class McpServerConnection : IAsyncDisposable
         };
 
         var rawResponse = await SendRequestAsync(request, cancellationToken);
-        return ParseToolResponse(rawResponse);
+        return await ParseToolResponse(rawResponse);
     }
 
     private async Task<object?> SendRequestAsync(object request, CancellationToken cancellationToken = default)
@@ -599,10 +599,12 @@ internal class McpServerConnection : IAsyncDisposable
         }
     }
     
-    private object? ParseToolResponse(object? rawResponse)
+    private async Task<object?> ParseToolResponse(object? rawResponse)
     {
         try
         {
+            await _debugLogger.LogMcpResponseProcessingAsync(rawResponse, "mcp-response-processing");
+            
             if (rawResponse is JsonElement element)
             {
                 // MCP 에러 응답 처리
@@ -628,6 +630,7 @@ internal class McpServerConnection : IAsyncDisposable
                     {
                         var textContents = new List<string>();
                         var allContent = new List<object>();
+                        var parsedData = new Dictionary<string, object>();
                         
                         foreach (var item in content.EnumerateArray())
                         {
@@ -635,7 +638,55 @@ internal class McpServerConnection : IAsyncDisposable
                             {
                                 if (item.TryGetProperty("text", out var text))
                                 {
-                                    textContents.Add(text.GetString() ?? "");
+                                    var textValue = text.GetString() ?? "";
+                                    textContents.Add(textValue);
+                                    
+                                    // 텍스트가 JSON인 경우 파싱 시도
+                                    try
+                                    {
+                                        if (textValue.StartsWith("{") && textValue.EndsWith("}"))
+                                        {
+                                            var innerJson = JsonSerializer.Deserialize<JsonElement>(textValue);
+                                            
+                                            // readLines 속성이 있는 경우 추가 파싱
+                                            if (innerJson.TryGetProperty("readLines", out var readLines))
+                                            {
+                                                var readLinesText = readLines.GetString() ?? "";
+                                                if (readLinesText.StartsWith("{") && readLinesText.EndsWith("}"))
+                                                {
+                                                    try
+                                                    {
+                                                        var actualData = JsonSerializer.Deserialize<JsonElement>(readLinesText);
+                                                        parsedData["database_info"] = JsonSerializer.Deserialize<object>(actualData.GetRawText()) ?? new object();
+                                                        _logger.LogDebug("Successfully parsed nested database info from readLines");
+                                                    }
+                                                    catch (Exception ex)
+                                                    {
+                                                        _logger.LogWarning(ex, "Failed to parse readLines JSON, using raw text");
+                                                        parsedData["database_info"] = readLinesText;
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    parsedData["database_info"] = readLinesText;
+                                                }
+                                            }
+                                            else
+                                            {
+                                                // readLines가 없는 경우 전체 JSON 사용
+                                                parsedData["tool_data"] = JsonSerializer.Deserialize<object>(innerJson.GetRawText()) ?? new object();
+                                            }
+                                        }
+                                        else
+                                        {
+                                            parsedData["text_data"] = textValue;
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogDebug(ex, "Text is not valid JSON, treating as plain text");
+                                        parsedData["text_data"] = textValue;
+                                    }
                                 }
                             }
                             
@@ -643,13 +694,24 @@ internal class McpServerConnection : IAsyncDisposable
                             allContent.Add(JsonSerializer.Deserialize<object>(item.GetRawText()) ?? new object());
                         }
                         
-                        return new
+                        var response = new Dictionary<string, object>
                         {
-                            success = true,
-                            text = string.Join("\n", textContents), // 주요 텍스트 내용
-                            content = allContent, // 원본 content 구조
-                            raw_result = JsonSerializer.Deserialize<object>(result.GetRawText())
+                            ["success"] = true,
+                            ["text"] = string.Join("\n", textContents), // 주요 텍스트 내용
+                            ["content"] = allContent, // 원본 content 구조
+                            ["raw_result"] = JsonSerializer.Deserialize<object>(result.GetRawText()) ?? new object()
                         };
+                        
+                        // 파싱된 데이터가 있으면 추가
+                        foreach (var kvp in parsedData)
+                        {
+                            response[kvp.Key] = kvp.Value;
+                        }
+                        
+                        _logger.LogInformation("Successfully parsed MCP tool response with {ContentCount} content items and {ParsedDataCount} parsed data elements", 
+                            allContent.Count, parsedData.Count);
+                        
+                        return response;
                     }
                     
                     // content가 없는 경우 result를 그대로 반환

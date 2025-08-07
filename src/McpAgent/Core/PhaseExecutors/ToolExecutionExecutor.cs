@@ -125,28 +125,61 @@ public class ToolExecutionExecutor : IPhaseExecutor
     {
         var toolCalls = new List<ToolCallInfo>();
         
-        if (parameterResult.Data.TryGetValue("tool_calls", out var toolCallsObj) &&
-            toolCallsObj is List<object> toolCallsList)
+        _logger.LogDebug("Phase 4: Extracting tool calls from parameter result data. Keys: {Keys}", 
+            string.Join(", ", parameterResult.Data.Keys));
+        
+        if (parameterResult.Data.TryGetValue("tool_calls", out var toolCallsObj))
         {
-            foreach (var toolCallObj in toolCallsList)
+            _logger.LogDebug("Phase 4: Found tool_calls object of type: {Type}", toolCallsObj?.GetType().Name ?? "null");
+            
+            if (toolCallsObj is List<object> toolCallsList)
             {
-                if (toolCallObj is Dictionary<string, object> toolCallDict)
+                _logger.LogDebug("Phase 4: Processing {Count} tool calls", toolCallsList.Count);
+                
+                foreach (var toolCallObj in toolCallsList)
                 {
-                    var toolCall = new ToolCallInfo
-                    {
-                        Name = toolCallDict.GetValueOrDefault("name")?.ToString() ?? "",
-                        Arguments = toolCallDict.GetValueOrDefault("parameters") as Dictionary<string, object> ?? new(),
-                        ExpectedOutputType = toolCallDict.GetValueOrDefault("expected_output_type")?.ToString() ?? "string"
-                    };
+                    _logger.LogDebug("Phase 4: Processing tool call object of type: {Type}", toolCallObj?.GetType().Name ?? "null");
                     
-                    if (!string.IsNullOrEmpty(toolCall.Name))
+                    if (toolCallObj is Dictionary<string, object> toolCallDict)
                     {
-                        toolCalls.Add(toolCall);
+                        var toolCall = new ToolCallInfo
+                        {
+                            Name = toolCallDict.GetValueOrDefault("name")?.ToString() ?? "",
+                            Arguments = toolCallDict.GetValueOrDefault("parameters") as Dictionary<string, object> ?? new(),
+                            ExpectedOutputType = toolCallDict.GetValueOrDefault("expected_output_type")?.ToString() ?? "string"
+                        };
+                        
+                        _logger.LogDebug("Phase 4: Parsed tool call - Name: {Name}, Arguments: {ArgCount}, OutputType: {OutputType}",
+                            toolCall.Name, toolCall.Arguments.Count, toolCall.ExpectedOutputType);
+                        
+                        if (!string.IsNullOrEmpty(toolCall.Name))
+                        {
+                            toolCalls.Add(toolCall);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("Phase 4: Tool call has empty name, skipping");
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Phase 4: Tool call object is not Dictionary<string, object>, actual type: {Type}", 
+                            toolCallObj?.GetType().Name ?? "null");
                     }
                 }
             }
+            else
+            {
+                _logger.LogWarning("Phase 4: tool_calls is not List<object>, actual type: {Type}", 
+                    toolCallsObj?.GetType().Name ?? "null");
+            }
+        }
+        else
+        {
+            _logger.LogWarning("Phase 4: No 'tool_calls' key found in parameter result data");
         }
         
+        _logger.LogInformation("Phase 4: Extracted {Count} tool calls for execution", toolCalls.Count);
         return toolCalls;
     }
     

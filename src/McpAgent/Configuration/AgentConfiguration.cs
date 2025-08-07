@@ -16,6 +16,44 @@ public class LlmConfiguration
     public int MaxToolContextTokens { get; set; } = 2048;
     public int MaxHistoryTokens { get; set; } = 2048;
     public double Temperature { get; set; } = 0.7;
+    
+    /// <summary>
+    /// 모델별 컨텍스트 윈도우 크기 설정
+    /// </summary>
+    public Dictionary<string, int> ContextWindows { get; set; } = new()
+    {
+        { "llama3.1:8b", 32768 },
+        { "llama3.1:7b", 32768 },
+        { "llama3.1", 32768 },
+        { "llama3:8b", 8192 },
+        { "llama3:7b", 8192 },
+        { "llama3", 8192 },
+        { "mistral:7b", 8192 },
+        { "mistral", 8192 },
+        { "codellama:7b", 16384 },
+        { "codellama", 16384 },
+        { "qwen2:7b", 32768 },
+        { "qwen2", 32768 },
+        { "phi3:mini", 4096 },
+        { "gemma:7b", 8192 },
+        { "neural-chat:7b", 4096 },
+        { "gpt-oss:20b", 32768 }  // 현재 사용 중인 모델 추가
+    };
+    
+    /// <summary>
+    /// 기본 컨텍스트 윈도우 크기 (알 수 없는 모델일 때 사용)
+    /// </summary>
+    public int DefaultContextWindowSize { get; set; } = 8192;
+    
+    /// <summary>
+    /// 응답 생성용 예약 토큰 수
+    /// </summary>
+    public int ReservedTokensForResponse { get; set; } = 2048;
+    
+    /// <summary>
+    /// 안전 여백 토큰 수
+    /// </summary>
+    public int SafetyMarginTokens { get; set; } = 512;
 }
 
 public class McpConfiguration

@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 // Parse CLI options first
 var cliOptions = CliOptions.ParseOptions(args);
@@ -22,7 +23,7 @@ var builder = Host.CreateDefaultBuilder(args)
     })
     .ConfigureServices((context, services) =>
     {
-        // Configure agent with CLI overrides
+        // Configure agent with CLI overrides and register for Options pattern
         services.Configure<AgentConfiguration>(agentConfig =>
         {
             context.Configuration.GetSection("Agent").Bind(agentConfig);
@@ -53,6 +54,9 @@ var builder = Host.CreateDefaultBuilder(args)
                 agentConfig.Agent.PromptStyle = cliOptions.PromptStyle;
             }
         });
+        
+        // Register AgentConfiguration for dependency injection
+        services.AddSingleton(provider => provider.GetRequiredService<IOptions<AgentConfiguration>>().Value);
 
         // Store CLI options for services that need them
         services.AddSingleton(cliOptions);
@@ -67,6 +71,7 @@ var builder = Host.CreateDefaultBuilder(args)
 
         // Core services
         services.AddSingleton<IDebugFileLogger, DebugFileLogger>();
+        services.AddSingleton<ITokenCalculationService, TokenCalculationService>();
         services.AddSingleton<ILlmProvider, OllamaProvider>();
         services.AddSingleton<IMcpClient, McpClient>();
         services.AddSingleton<IConversationManager, InMemoryConversationManager>();

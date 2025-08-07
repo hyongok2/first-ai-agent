@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 
 namespace McpAgent.Services;
 
@@ -47,6 +48,40 @@ public class DebugFileLogger : IDebugFileLogger
         content.AppendLine();
         content.AppendLine("=== MCP RESPONSE ===");
         content.AppendLine(response);
+        content.AppendLine();
+
+        await File.WriteAllTextAsync(filepath, content.ToString(), Encoding.UTF8);
+    }
+
+    public async Task LogMcpResponseProcessingAsync(object? rawResponse, string category = "mcp-processing")
+    {
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
+        var filename = $"{timestamp}_{category}_processing.txt";
+        var filepath = Path.Combine(_debugDirectory, filename);
+
+        var content = new StringBuilder();
+        content.AppendLine($"Timestamp: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
+        content.AppendLine($"Category: {category}");
+        content.AppendLine();
+        content.AppendLine("=== RAW RESPONSE OBJECT ===");
+        content.AppendLine($"Type: {rawResponse?.GetType().Name ?? "null"}");
+        
+        if (rawResponse != null)
+        {
+            try
+            {
+                var jsonString = rawResponse is JsonElement element ? 
+                    JsonSerializer.Serialize(element, new JsonSerializerOptions { WriteIndented = true }) :
+                    JsonSerializer.Serialize(rawResponse, new JsonSerializerOptions { WriteIndented = true });
+                content.AppendLine("JSON Representation:");
+                content.AppendLine(jsonString);
+            }
+            catch (Exception ex)
+            {
+                content.AppendLine($"Failed to serialize: {ex.Message}");
+                content.AppendLine($"ToString(): {rawResponse}");
+            }
+        }
         content.AppendLine();
 
         await File.WriteAllTextAsync(filepath, content.ToString(), Encoding.UTF8);

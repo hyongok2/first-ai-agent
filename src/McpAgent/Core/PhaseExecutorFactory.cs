@@ -45,7 +45,8 @@ public class PhaseExecutorFactory : IPhaseExecutorFactory
                 _serviceProvider.GetRequiredService<ILogger<ResponseSynthesisExecutor>>(),
                 _serviceProvider.GetRequiredService<ILlmProvider>(),
                 _serviceProvider.GetRequiredService<ISystemContextProvider>(),
-                _serviceProvider.GetRequiredService<IDebugFileLogger>())
+                _serviceProvider.GetRequiredService<IDebugFileLogger>(),
+                _serviceProvider.GetRequiredService<ITokenCalculationService>())
         };
     }
     
