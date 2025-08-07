@@ -57,6 +57,12 @@ public class LoopContext
             return false;
         }
         
+        // Success 상태면 루프하지 않음 (핵심 수정)
+        if (result.Status == ExecutionStatus.Success && !result.RequiresUserInput)
+        {
+            return false;
+        }
+        
         // 단계별 루프 조건 체크
         return fromPhase switch
         {

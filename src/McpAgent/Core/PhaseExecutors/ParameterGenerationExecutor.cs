@@ -102,10 +102,14 @@ public class ParameterGenerationExecutor : IPhaseExecutor
     
     private string BuildParameterGenerationPrompt(string systemContext, string userInput, ToolDefinition tool, PhaseResult functionResult)
     {
+        // 선택된 도구의 완전한 스키마 정보 제공 (Documentation, Examples 포함)
         var toolSchemaJson = JsonSerializer.Serialize(new
         {
             tool.Name,
             tool.Description,
+            tool.Documentation,
+            tool.Category,
+            tool.Tags,
             Parameters = tool.Parameters?.Select(p => new
             {
                 Name = p.Key,
@@ -113,6 +117,11 @@ public class ParameterGenerationExecutor : IPhaseExecutor
                 Description = p.Value.Description,
                 Required = p.Value.Required,
                 DefaultValue = p.Value.DefaultValue
+            }),
+            Examples = tool.Examples?.Select(e => new {  // 모든 예시 포함 (파라미터 생성에 중요)
+                e.Description,
+                e.Arguments,
+                e.ExpectedResult
             })
         }, new JsonSerializerOptions { WriteIndented = true });
         
@@ -121,42 +130,119 @@ public class ParameterGenerationExecutor : IPhaseExecutor
         return $@"
 {systemContext}
 
-**ROLE**: Parameter Builder
-**TASK**: Generate precise parameters for the selected function
+**ROLE**: Expert Parameter Builder with Tool Mastery
+**TASK**: Generate precise parameters using complete tool knowledge including documentation and examples
 
 **USER INPUT**: {userInput}
 **SELECTED FUNCTION**: {tool.Name}
 **FUNCTION SELECTION CONTEXT**: {functionData}
-**TOOL SCHEMA**: {toolSchemaJson}
 
-**PARAMETER GENERATION RULES**:
-1. Extract all required parameters from user input and system context
-2. Use system context for default values (current directory, time, etc.)
-3. Validate parameter types and formats
-4. Identify any missing required information
-5. Provide reasonable defaults where possible
+**COMPLETE TOOL SPECIFICATION** (documentation, parameters, examples):
+{toolSchemaJson}
 
-**CONTEXT MAPPING**:
-- File paths: Use working_directory from system context if relative path
-- Time/Date: Use current_time from system context for ""now"", ""today"", etc.
-- Location: Use location_info if available for location-based queries
+**ADVANCED PARAMETER GENERATION PROCESS**:
+1. **Study Examples**: Review ALL provided examples to understand usage patterns
+2. **Apply Documentation**: Use tool documentation to understand parameter nuances  
+3. **Parameter Mapping**: Map user input to parameters using examples as reference
+4. **Validation**: Ensure parameter types match the schema exactly
+5. **Context Integration**: Use system context to fill in missing details
 
-**RESPONSE FORMAT** (JSON only):
+**EXAMPLE-DRIVEN MAPPING**:
+- Look for examples that closely match the user's request
+- Copy parameter patterns from similar examples
+- Adapt example values to fit the current user input
+- Use example expected results to validate parameter correctness
+
+**ENHANCED PARAMETER RULES**:
+- **Exact Type Matching**: Ensure parameter types match schema (string, number, boolean, array, object)
+- **Required Parameters**: All required parameters MUST be provided
+- **Default Values**: Use schema default values when user input is unclear
+- **Example Patterns**: Follow parameter patterns demonstrated in examples
+- **Documentation Guidance**: Apply constraints and formats from documentation
+
+**INTELLIGENT CONTEXT MAPPING**:
+- File paths: Convert relative to absolute using working_directory
+- Date/Time: Parse temporal expressions using current system time
+- Location: Apply location context when available
+- User preferences: Consider any user context from previous interactions
+
+**MCP TOOL CALL JSON FORMAT** (CRITICAL - Follow exactly):
+
+**REQUIRED JSON STRUCTURE**:
 {{
     ""tool_calls"": [
         {{
-            ""name"": ""{tool.Name}"",
+            ""name"": ""exact_tool_name_from_schema"",
             ""parameters"": {{
-                ""param1"": ""value1"",
-                ""param2"": ""value2""
+                ""parameter_name"": ""parameter_value"",
+                ""another_param"": 123,
+                ""boolean_param"": true
             }},
-            ""expected_output_type"": ""string|object|array""
+            ""expected_output_type"": ""string""
         }}
     ],
-    ""parameter_confidence"": 0.0,
+    ""parameter_confidence"": 0.85,
+    ""missing_info"": [""any missing required info""],
+    ""reasoning"": ""detailed explanation with example references""
+}}
+
+**IMPORTANT**: The ""parameters"" object will be passed as arguments to the MCP tool via CallToolAsync(name, arguments). Use exact parameter names from the tool schema.
+
+**JSON FORMAT RULES**:
+- ALL keys must be in double quotes: ""name"", ""parameters""
+- String values in double quotes: ""value""
+- Numbers without quotes: 123, 0.85
+- Booleans without quotes: true, false  
+- Arrays with square brackets: [""item1"", ""item2""]
+- Objects with curly braces: {{""key"": ""value""}}
+
+**PARAMETER TYPE EXAMPLES**:
+- String: ""file.txt"", ""/path/to/file"", ""Hello World""
+- Number: 42, 3.14, 0
+- Boolean: true, false
+- Array: [""item1"", ""item2""], [1, 2, 3]
+- Object: {{""key1"": ""value1"", ""key2"": 123}}
+
+**COMPLETE REAL EXAMPLES**:
+
+File reading:
+{{
+    ""tool_calls"": [{{
+        ""name"": ""read_file"",
+        ""parameters"": {{
+            ""path"": ""document.txt"",
+            ""encoding"": ""utf-8""
+        }},
+        ""expected_output_type"": ""string""
+    }}],
+    ""parameter_confidence"": 0.9,
     ""missing_info"": [],
-    ""reasoning"": ""parameter generation explanation""
-}}";
+    ""reasoning"": ""Using read_file example from tool documentation with path parameter""
+}}
+
+Directory listing:
+{{
+    ""tool_calls"": [{{
+        ""name"": ""list_directory"",
+        ""parameters"": {{
+            ""path"": ""."",
+            ""include_hidden"": false
+        }},
+        ""expected_output_type"": ""array""
+    }}],
+    ""parameter_confidence"": 0.95,
+    ""missing_info"": [],
+    ""reasoning"": ""Following list_directory example pattern for current directory""
+}}
+
+**CRITICAL REQUIREMENTS**:
+- Copy tool name EXACTLY from the schema
+- Match parameter names EXACTLY from the schema
+- Use correct parameter types as specified in schema
+- Reference specific examples from tool documentation in reasoning
+- Set confidence based on parameter completeness and example matching
+
+**YOUR TASK**: Generate the exact JSON format above for tool ""{tool.Name}""";
     }
     
     private ParameterGenerationResult ParseParameterResponse(string response, ToolDefinition tool)

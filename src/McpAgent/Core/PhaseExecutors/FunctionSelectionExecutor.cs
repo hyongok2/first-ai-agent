@@ -65,10 +65,25 @@ public class FunctionSelectionExecutor : IPhaseExecutor
     
     private string BuildFunctionSelectionPrompt(string systemContext, PhaseResult intentResult, List<ToolDefinition> functions)
     {
+        // 완전한 도구 정보 제공 (Documentation, Examples 포함)
         var functionsJson = JsonSerializer.Serialize(functions.Select(f => new {
             f.Name, 
             f.Description,
-            Parameters = f.Parameters?.Select(p => new { p.Key, p.Value.Type, p.Value.Description, p.Value.Required })
+            f.Documentation,
+            f.Category,
+            f.Tags,
+            Parameters = f.Parameters?.Select(p => new { 
+                p.Key, 
+                p.Value.Type, 
+                p.Value.Description, 
+                p.Value.Required,
+                p.Value.DefaultValue
+            }),
+            Examples = f.Examples?.Take(2).Select(e => new {  // 최대 2개 예시만 표시 (토큰 절약)
+                e.Description,
+                e.Arguments,
+                e.ExpectedResult
+            })
         }), new JsonSerializerOptions { WriteIndented = true });
         
         var intentData = JsonSerializer.Serialize(intentResult.Data, new JsonSerializerOptions { WriteIndented = true });
@@ -76,43 +91,107 @@ public class FunctionSelectionExecutor : IPhaseExecutor
         return $@"
 {systemContext}
 
-**ROLE**: Function Selector  
-**TASK**: Select appropriate function considering current system context
+**ROLE**: Expert Function Selector with Complete Tool Knowledge
+**TASK**: Analyze complete tool capabilities and select the most appropriate function
 
 **USER INTENT ANALYSIS**: {intentData}
-**AVAILABLE FUNCTIONS**: {functionsJson}
 
-**CONTEXT-AWARE SELECTION**:
-- For time-based queries: Use current_time context
-- For file operations: Consider working_directory context  
-- For location queries: Check if location_info available
-- For system operations: Consider current_os and permissions
+**COMPLETE FUNCTION CATALOG** (with documentation, parameters, and examples):
+{functionsJson}
 
-**SELECTION CRITERIA**:
-1. Function capability matches intent
-2. Required context information is available  
-3. System resources are sufficient
-4. User permissions allow function execution
+**INTELLIGENT SELECTION PROCESS**:
+1. **Capability Analysis**: Review each function's documentation and examples
+2. **Parameter Compatibility**: Ensure required parameters can be derived from context
+3. **Example Matching**: Look for similar use cases in the provided examples
+4. **Context Requirements**: Verify system context supports the function
 
-**SPECIAL CASES**:
-- If intent_type is ""chat"": Select ""chat_response"" function
-- If no suitable tool found: Select ""fallback_response"" function
-- If multiple tools needed: Use execution_strategy ""sequential""
+**ADVANCED SELECTION CRITERIA**:
+- **Exact Match**: Function examples directly match user intent
+- **Parameter Availability**: All required parameters can be determined
+- **Documentation Clarity**: Function documentation clearly supports the use case
+- **Category Relevance**: Function category aligns with intent type
+- **Context Sufficiency**: System context provides necessary information
 
-**RESPONSE FORMAT** (JSON only):
+**ENHANCED DECISION LOGIC**:
+- Review function examples to find closest match to user request
+- Check if required parameters can be extracted from context or user input
+- Consider function documentation to understand full capabilities
+- Use category and tags for additional context about function purpose
+
+**FUNCTION SELECTION JSON FORMAT** (CRITICAL - Follow exactly):
+
+**REQUIRED JSON STRUCTURE**:
 {{
-    ""primary_function"": ""function_name"",
-    ""secondary_functions"": [],
-    ""execution_strategy"": ""single|sequential|parallel"",
+    ""primary_function"": ""exact_function_name_from_catalog"",
+    ""secondary_functions"": [""function2"", ""function3""],
+    ""execution_strategy"": ""single"",
     ""context_requirements"": {{
-        ""time_context"": true/false,
-        ""location_context"": true/false,
-        ""system_context"": true/false
+        ""time_context"": true,
+        ""location_context"": false,
+        ""system_context"": true
     }},
-    ""required_parameters"": {{}},
-    ""confidence_score"": 0.0,
-    ""reasoning"": ""why this function with current context""
-}}";
+    ""required_parameters"": {{
+        ""param_name"": ""expected_value_type""
+    }},
+    ""confidence_score"": 0.85,
+    ""reasoning"": ""detailed explanation referencing specific documentation and examples""
+}}
+
+**JSON FORMAT RULES**:
+- ALL keys in double quotes: ""primary_function""
+- String values in double quotes: ""function_name""
+- Numbers without quotes: 0.85
+- Booleans without quotes: true, false
+- Arrays with square brackets: [""func1"", ""func2""]
+- Empty arrays: []
+- Empty objects: {{}}
+
+**EXECUTION STRATEGY VALUES**:
+- ""single"": One function call only
+- ""sequential"": Multiple functions in order
+- ""parallel"": Multiple functions simultaneously  
+
+**COMPLETE REAL EXAMPLES**:
+
+File operation selection:
+{{
+    ""primary_function"": ""read_file"",
+    ""secondary_functions"": [],
+    ""execution_strategy"": ""single"",
+    ""context_requirements"": {{
+        ""time_context"": false,
+        ""location_context"": false,
+        ""system_context"": true
+    }},
+    ""required_parameters"": {{
+        ""path"": ""string""
+    }},
+    ""confidence_score"": 0.9,
+    ""reasoning"": ""User wants to read a file. read_file function documentation shows exact match with path parameter required.""
+}}
+
+Multi-step operation:
+{{
+    ""primary_function"": ""list_directory"",
+    ""secondary_functions"": [""read_file""],
+    ""execution_strategy"": ""sequential"",
+    ""context_requirements"": {{
+        ""time_context"": false,
+        ""location_context"": false,
+        ""system_context"": true
+    }},
+    ""required_parameters"": {{
+        ""path"": ""string""
+    }},
+    ""confidence_score"": 0.85,
+    ""reasoning"": ""User wants to explore directory contents then read specific files. Examples show list_directory followed by read_file pattern.""
+}}
+
+**CRITICAL REQUIREMENTS**:
+- Copy function names EXACTLY from the catalog
+- Reference specific examples from function documentation
+- Set confidence based on documentation match and example similarity
+- Explain reasoning with specific references to function capabilities";
     }
     
     private FunctionSelectionResult ParseFunctionResponse(string response, List<ToolDefinition> availableFunctions)

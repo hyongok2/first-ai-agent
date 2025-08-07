@@ -86,15 +86,77 @@ Consider the current time and date when interpreting requests like:
 4. Provide confidence score (0.0-1.0)
 5. Suggest clarification if needed
 
-**RESPONSE FORMAT** (JSON only):
+**INTENT ANALYSIS JSON FORMAT** (CRITICAL - Follow exactly):
+
+**REQUIRED JSON STRUCTURE**:
 {{
-    ""intent_type"": ""string"",
-    ""confidence_score"": 0.0,
-    ""temporal_context"": ""none|time_sensitive|date_specific"",
-    ""location_context"": ""none|location_required|location_helpful"",
+    ""intent_type"": ""chat|tool_usage|complex_task|clarification_needed"",
+    ""confidence_score"": 0.85,
+    ""temporal_context"": ""none"",
+    ""location_context"": ""none"", 
+    ""clarification_questions"": [""question1"", ""question2""],
+    ""estimated_complexity"": ""simple"",
+    ""reasoning"": ""detailed explanation with context considerations""
+}}
+
+**JSON FORMAT RULES**:
+- ALL keys in double quotes: ""intent_type""
+- String values in double quotes: ""chat""
+- Numbers without quotes: 0.85
+- Arrays with square brackets: [""question1""]
+- Empty arrays: []
+
+**VALID VALUES**:
+- intent_type: ""chat"", ""tool_usage"", ""complex_task"", ""clarification_needed""
+- temporal_context: ""none"", ""time_sensitive"", ""date_specific""
+- location_context: ""none"", ""location_required"", ""location_helpful""
+- estimated_complexity: ""simple"", ""moderate"", ""complex""
+- confidence_score: 0.0 to 1.0
+
+**COMPLETE REAL EXAMPLES**:
+
+Simple chat request:
+{{
+    ""intent_type"": ""chat"",
+    ""confidence_score"": 0.9,
+    ""temporal_context"": ""none"",
+    ""location_context"": ""none"",
     ""clarification_questions"": [],
-    ""estimated_complexity"": ""simple|moderate|complex"",
-    ""reasoning"": ""brief explanation considering context""
+    ""estimated_complexity"": ""simple"",
+    ""reasoning"": ""User greeting or general question, no tool usage required""
+}}
+
+File operation request:
+{{
+    ""intent_type"": ""tool_usage"",
+    ""confidence_score"": 0.95,
+    ""temporal_context"": ""none"",
+    ""location_context"": ""none"",
+    ""clarification_questions"": [],
+    ""estimated_complexity"": ""simple"",
+    ""reasoning"": ""Clear request to read/write files, tools available and context sufficient""
+}}
+
+Time-sensitive request:
+{{
+    ""intent_type"": ""tool_usage"",
+    ""confidence_score"": 0.8,
+    ""temporal_context"": ""time_sensitive"",
+    ""location_context"": ""none"",
+    ""clarification_questions"": [],
+    ""estimated_complexity"": ""moderate"",
+    ""reasoning"": ""Request mentions 'now' or 'today', requires current time context""
+}}
+
+Unclear request needing clarification:
+{{
+    ""intent_type"": ""clarification_needed"",
+    ""confidence_score"": 0.3,
+    ""temporal_context"": ""none"",
+    ""location_context"": ""none"",
+    ""clarification_questions"": [""Which file do you want to read?"", ""What specific information are you looking for?""],
+    ""estimated_complexity"": ""simple"",
+    ""reasoning"": ""User request is ambiguous, need more details before proceeding""
 }}";
     }
     

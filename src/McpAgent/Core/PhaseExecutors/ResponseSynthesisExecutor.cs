@@ -89,19 +89,28 @@ public class ResponseSynthesisExecutor : IPhaseExecutor
 **PROCESSING CONTEXT**: {contextSummary}
 **EXECUTION RESULTS**: {resultsJson}
 
+**MCP RESPONSE STRUCTURE UNDERSTANDING**:
+- Each execution result has a 'result' object with the actual MCP tool response
+- Look for 'text' field in result - this contains the main readable content
+- Look for 'success' field to determine if the operation succeeded
+- Look for 'error' field if the operation failed
+- 'content' array may contain structured data with 'type' and 'text' fields
+
 **RESPONSE GUIDELINES**:
-1. Create a natural, conversational response
-2. Summarize what was accomplished
-3. Present results in user-friendly format
-4. Suggest logical follow-up actions if appropriate
-5. Be concise but informative
-6. If errors occurred, explain what went wrong and suggest alternatives
+1. Extract the main content from 'text' field or 'content[].text' in results
+2. Create a natural, conversational response based on actual tool outputs
+3. Present file contents, directory listings, or other data in readable format
+4. Summarize what was accomplished using the actual tool results
+5. Suggest logical follow-up actions if appropriate
+6. Be concise but informative, focusing on the actual data returned
+7. If errors occurred, explain what went wrong using the error messages from tools
 
 **SPECIAL CASES**:
-- If chat_response was executed: Use the result directly with minor enhancement
-- If file operations: Describe what files were accessed/created
-- If errors occurred: Be empathetic and provide helpful guidance
-- If multiple tools used: Summarize the workflow completed
+- If chat_response was executed: Use the result text directly with minor enhancement
+- If file operations: Present the actual file content or directory listing from 'text' field
+- If errors occurred: Extract error message from 'error' field and provide helpful guidance
+- If multiple tools used: Summarize the workflow and combine all text results logically
+- If 'text' field is empty but 'content' exists: Extract text from content array
 
 **RESPONSE FORMAT** (JSON only):
 {{

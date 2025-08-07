@@ -26,7 +26,7 @@ public class ConversationOrchestrator
     public async Task<AgentResponse> ProcessAsync(string userInput, string conversationId)
     {
         var state = await _stateManager.GetStateAsync(conversationId);
-        var maxIterations = 20; // 전체 대화 최대 반복
+        var maxIterations = 30; // 전체 대화 최대 반복 (타임아웃 증가에 따라 조정)
         var iteration = 0;
         
         // 사용자 컨텍스트 업데이트
@@ -95,19 +95,36 @@ public class ConversationOrchestrator
         return CreateErrorResponse("처리 시간이 너무 오래 걸립니다.", state);
     }
     
+    /// <summary>
+    /// Phase별 최적화된 타임아웃 시간 반환
+    /// </summary>
+    private int GetPhaseTimeout(int phase)
+    {
+        return phase switch
+        {
+            1 => 120,  // Intent Analysis: 의도 파악 (2분)
+            2 => 180,  // Function Selection: 복잡한 도구 분석 (3분)
+            3 => 180,  // Parameter Generation: 파라미터 생성 (3분)
+            4 => 300,  // Tool Execution: 외부 도구 실행 (5분)
+            5 => 120,  // Response Synthesis: 응답 생성 (2분)
+            _ => 180   // 기본값 (3분)
+        };
+    }
+    
     private async Task<PhaseResult> ExecutePhaseAsync(int phase, ConversationState state, string userInput)
     {
         var executor = _phaseExecutorFactory.GetExecutor(phase);
         
-        _logger.LogDebug("Executing phase {Phase} for conversation {ConversationId}", 
-            phase, state.ConversationId);
+        _logger.LogDebug("Executing phase {Phase} for conversation {ConversationId} with {Timeout}s timeout", 
+            phase, state.ConversationId, GetPhaseTimeout(phase));
             
         var startTime = DateTime.UtcNow;
         
         try
         {
-            // Add timeout per phase (60 seconds)
-            using var phaseCts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            // Phase별 적응형 타임아웃 설정
+            var timeoutSeconds = GetPhaseTimeout(phase);
+            using var phaseCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
             var result = await executor.ExecuteAsync(state, userInput, phaseCts.Token);
             var duration = DateTime.UtcNow - startTime;
             
@@ -119,16 +136,19 @@ public class ConversationOrchestrator
         catch (OperationCanceledException ex)
         {
             var duration = DateTime.UtcNow - startTime;
-            _logger.LogError("Phase {Phase} timed out after {Duration}ms", phase, duration.TotalMilliseconds);
+            var timeoutSeconds = GetPhaseTimeout(phase);
+            _logger.LogError("Phase {Phase} timed out after {Duration}ms (timeout: {Timeout}s)", 
+                phase, duration.TotalMilliseconds, timeoutSeconds);
             
             return new PhaseResult
             {
                 Phase = phase,
                 Status = ExecutionStatus.Failure,
-                ErrorMessage = "Phase execution timed out",
+                ErrorMessage = $"Phase {phase} execution timed out after {timeoutSeconds} seconds",
                 Data = new Dictionary<string, object> 
                 { 
                     ["timeout"] = true,
+                    ["timeout_seconds"] = timeoutSeconds,
                     ["duration_ms"] = duration.TotalMilliseconds
                 }
             };

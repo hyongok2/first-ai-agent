@@ -269,7 +269,8 @@ internal class McpServerConnection : IAsyncDisposable
             }
         };
 
-        return await SendRequestAsync(request, cancellationToken);
+        var rawResponse = await SendRequestAsync(request, cancellationToken);
+        return ParseToolResponse(rawResponse);
     }
 
     private async Task<object?> SendRequestAsync(object request, CancellationToken cancellationToken = default)
@@ -586,6 +587,84 @@ internal class McpServerConnection : IAsyncDisposable
             {
                 _process.Kill();
             }
+        }
+    }
+    
+    private object? ParseToolResponse(object? rawResponse)
+    {
+        try
+        {
+            if (rawResponse is JsonElement element)
+            {
+                // MCP 에러 응답 처리
+                if (element.TryGetProperty("error", out var error))
+                {
+                    var errorCode = error.TryGetProperty("code", out var code) ? code.GetInt32() : -1;
+                    var errorMessage = error.TryGetProperty("message", out var message) ? message.GetString() : "Unknown error";
+                    
+                    _logger.LogError("MCP tool error {ErrorCode}: {ErrorMessage}", errorCode, errorMessage);
+                    return new
+                    {
+                        success = false,
+                        error = errorMessage,
+                        error_code = errorCode
+                    };
+                }
+                
+                // MCP 성공 응답 처리
+                if (element.TryGetProperty("result", out var result))
+                {
+                    // content 배열에서 텍스트 추출
+                    if (result.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
+                    {
+                        var textContents = new List<string>();
+                        var allContent = new List<object>();
+                        
+                        foreach (var item in content.EnumerateArray())
+                        {
+                            if (item.TryGetProperty("type", out var type) && type.GetString() == "text")
+                            {
+                                if (item.TryGetProperty("text", out var text))
+                                {
+                                    textContents.Add(text.GetString() ?? "");
+                                }
+                            }
+                            
+                            // 모든 content 보존
+                            allContent.Add(JsonSerializer.Deserialize<object>(item.GetRawText()) ?? new object());
+                        }
+                        
+                        return new
+                        {
+                            success = true,
+                            text = string.Join("\n", textContents), // 주요 텍스트 내용
+                            content = allContent, // 원본 content 구조
+                            raw_result = JsonSerializer.Deserialize<object>(result.GetRawText())
+                        };
+                    }
+                    
+                    // content가 없는 경우 result를 그대로 반환
+                    return new
+                    {
+                        success = true,
+                        result = JsonSerializer.Deserialize<object>(result.GetRawText()),
+                        raw_result = JsonSerializer.Deserialize<object>(result.GetRawText())
+                    };
+                }
+            }
+            
+            // 파싱 실패 시 원본 반환
+            return rawResponse;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error parsing MCP tool response");
+            return new
+            {
+                success = false,
+                error = "Failed to parse response",
+                raw_response = rawResponse
+            };
         }
     }
 }
