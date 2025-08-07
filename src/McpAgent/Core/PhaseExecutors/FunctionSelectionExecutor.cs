@@ -13,6 +13,7 @@ public class FunctionSelectionExecutor : IPhaseExecutor
     private readonly ILlmProvider _llm;
     private readonly ISystemContextProvider _contextProvider;
     private readonly IMcpClient _mcpClient;
+    private readonly IDebugFileLogger _debugLogger;
     
     public int PhaseNumber => 2;
     
@@ -20,12 +21,14 @@ public class FunctionSelectionExecutor : IPhaseExecutor
         ILogger<FunctionSelectionExecutor> logger,
         ILlmProvider llm,
         ISystemContextProvider contextProvider,
-        IMcpClient mcpClient)
+        IMcpClient mcpClient,
+        IDebugFileLogger debugLogger)
     {
         _logger = logger;
         _llm = llm;
         _contextProvider = contextProvider;
         _mcpClient = mcpClient;
+        _debugLogger = debugLogger;
     }
     
     public async Task<PhaseResult> ExecuteAsync(ConversationState state, string userInput, CancellationToken cancellationToken = default)
@@ -44,6 +47,9 @@ public class FunctionSelectionExecutor : IPhaseExecutor
             
             _logger.LogDebug("Phase 2: Selecting appropriate function");
             var response = await _llm.GenerateResponseAsync(prompt, [], cancellationToken);
+            
+            // Debug logging for prompt and response
+            await _debugLogger.LogPromptAndResponseAsync(prompt, response, "function-selection");
             
             var parsed = ParseFunctionResponse(response, availableFunctions);
             

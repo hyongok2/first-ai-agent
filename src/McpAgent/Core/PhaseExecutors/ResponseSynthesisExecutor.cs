@@ -11,17 +11,20 @@ public class ResponseSynthesisExecutor : IPhaseExecutor
     private readonly ILogger<ResponseSynthesisExecutor> _logger;
     private readonly ILlmProvider _llm;
     private readonly ISystemContextProvider _contextProvider;
+    private readonly IDebugFileLogger _debugLogger;
     
     public int PhaseNumber => 5;
     
     public ResponseSynthesisExecutor(
         ILogger<ResponseSynthesisExecutor> logger,
         ILlmProvider llm,
-        ISystemContextProvider contextProvider)
+        ISystemContextProvider contextProvider,
+        IDebugFileLogger debugLogger)
     {
         _logger = logger;
         _llm = llm;
         _contextProvider = contextProvider;
+        _debugLogger = debugLogger;
     }
     
     public async Task<PhaseResult> ExecuteAsync(ConversationState state, string userInput, CancellationToken cancellationToken = default)
@@ -45,6 +48,9 @@ public class ResponseSynthesisExecutor : IPhaseExecutor
             
             _logger.LogDebug("Phase 5: Synthesizing final response");
             var response = await _llm.GenerateResponseAsync(prompt, [], cancellationToken);
+            
+            // Debug logging for prompt and response
+            await _debugLogger.LogPromptAndResponseAsync(prompt, response, "response-synthesis");
             
             var parsed = ParseResponseSynthesis(response);
             

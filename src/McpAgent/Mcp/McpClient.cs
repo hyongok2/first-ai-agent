@@ -5,6 +5,7 @@ using McpAgent.Common;
 using McpAgent.Configuration;
 using McpAgent.Models;
 using McpAgent.Providers;
+using McpAgent.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -16,11 +17,13 @@ public class McpClient : IMcpClient
     private readonly McpConfiguration _config;
     private readonly Dictionary<string, McpServerConnection> _connections = new();
     private readonly Timer? _healthCheckTimer;
+    private readonly IDebugFileLogger _debugLogger;
 
-    public McpClient(ILogger<McpClient> logger, IOptions<AgentConfiguration> options)
+    public McpClient(ILogger<McpClient> logger, IOptions<AgentConfiguration> options, IDebugFileLogger debugLogger)
     {
         _logger = logger;
         _config = options.Value.Mcp;
+        _debugLogger = debugLogger;
         
         // Start health check timer (every 30 seconds)
         _healthCheckTimer = new Timer(PerformHealthCheck, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
@@ -83,7 +86,7 @@ public class McpClient : IMcpClient
 
             process.Start();
 
-            var connection = new McpServerConnection(serverName, process, _logger);
+            var connection = new McpServerConnection(serverName, process, _logger, _debugLogger);
             await connection.InitializeAsync(cancellationToken);
 
             _connections[serverName] = connection;
@@ -202,6 +205,7 @@ internal class McpServerConnection : IAsyncDisposable
     private readonly string _serverName;
     private readonly Process _process;
     private readonly ILogger _logger;
+    private readonly IDebugFileLogger _debugLogger;
     private readonly SemaphoreSlim _requestSemaphore = new(1, 1);
     private readonly object _responseLock = new();
     private readonly Queue<string> _responseBuffer = new();
@@ -210,11 +214,12 @@ internal class McpServerConnection : IAsyncDisposable
 
     public string ServerName => _serverName;
 
-    public McpServerConnection(string serverName, Process process, ILogger logger)
+    public McpServerConnection(string serverName, Process process, ILogger logger, IDebugFileLogger debugLogger)
     {
         _serverName = serverName;
         _process = process;
         _logger = logger;
+        _debugLogger = debugLogger;
         
         // Start background task to read responses
         _responseReaderTask = Task.Run(ReadResponsesAsync, _readerCancellation.Token);
@@ -290,6 +295,10 @@ internal class McpServerConnection : IAsyncDisposable
             if (response != null)
             {
                 _logger.LogDebug("Received MCP response from {ServerName}: {Response}", _serverName, response);
+                
+                // Debug logging for MCP request and response
+                await _debugLogger.LogMcpRequestAndResponseAsync(json, response, $"mcp-{_serverName}");
+                
                 return JsonSerializer.Deserialize<object>(response);
             }
             

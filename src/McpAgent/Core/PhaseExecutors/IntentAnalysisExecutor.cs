@@ -11,17 +11,20 @@ public class IntentAnalysisExecutor : IPhaseExecutor
     private readonly ILogger<IntentAnalysisExecutor> _logger;
     private readonly ILlmProvider _llm;
     private readonly ISystemContextProvider _contextProvider;
+    private readonly IDebugFileLogger _debugLogger;
     
     public int PhaseNumber => 1;
     
     public IntentAnalysisExecutor(
         ILogger<IntentAnalysisExecutor> logger,
         ILlmProvider llm,
-        ISystemContextProvider contextProvider)
+        ISystemContextProvider contextProvider,
+        IDebugFileLogger debugLogger)
     {
         _logger = logger;
         _llm = llm;
         _contextProvider = contextProvider;
+        _debugLogger = debugLogger;
     }
     
     public async Task<PhaseResult> ExecuteAsync(ConversationState state, string userInput, CancellationToken cancellationToken = default)
@@ -36,7 +39,10 @@ public class IntentAnalysisExecutor : IPhaseExecutor
             _logger.LogDebug("Phase 1: Analyzing user intent");
             var response = await _llm.GenerateResponseAsync(prompt, [], cancellationToken);
             
-            var parsed = ParseIntentResponse(response);
+            // Debug logging for prompt and response
+            await _debugLogger.LogPromptAndResponseAsync(prompt, response, "intent-analysis");
+            
+            var parsed = ParseIntentResponse(response, userInput);
             
             return new PhaseResult
             {
@@ -86,6 +92,21 @@ Consider the current time and date when interpreting requests like:
 4. Provide confidence score (0.0-1.0)
 5. Suggest clarification if needed
 
+**TOOL USAGE DETECTION RULES**:
+- If the request can be fulfilled by ANY available tool, classify as ""tool_usage""
+- ""Database"", ""DB"", ""Oracle"", ""테이블"", ""스키마"" → Use OracleDbTools
+- ""Connection test"", ""연결 테스트"" → Use OracleDbTools_TestConnection
+- ""Database info"", ""DB info"", ""스키마 정보"", ""테이블 정보"" → Use OracleDbTools_GetDatabaseInfo
+- ""Query"", ""SELECT"", ""조회"" → Use OracleDbTools_Query
+- ""Echo"", ""반복"", ""메아리"" → Use Echo_Echo
+
+**CLARIFICATION RULES**:
+- Only use ""clarification_needed"" if:
+  1. The request is genuinely ambiguous AND
+  2. NO available tool can reasonably fulfill the request AND
+  3. Multiple interpretations are equally possible
+- If ANY tool matches the request, use ""tool_usage"" instead
+
 **INTENT ANALYSIS JSON FORMAT** (CRITICAL - Follow exactly):
 
 **REQUIRED JSON STRUCTURE**:
@@ -126,7 +147,7 @@ Simple chat request:
     ""reasoning"": ""User greeting or general question, no tool usage required""
 }}
 
-File operation request:
+Database information request:
 {{
     ""intent_type"": ""tool_usage"",
     ""confidence_score"": 0.95,
@@ -134,7 +155,18 @@ File operation request:
     ""location_context"": ""none"",
     ""clarification_questions"": [],
     ""estimated_complexity"": ""simple"",
-    ""reasoning"": ""Clear request to read/write files, tools available and context sufficient""
+    ""reasoning"": ""Clear request for database information. OracleDbTools_GetDatabaseInfo tool is available and matches exactly.""
+}}
+
+Oracle DB Info request:
+{{
+    ""intent_type"": ""tool_usage"",
+    ""confidence_score"": 0.9,
+    ""temporal_context"": ""none"",
+    ""location_context"": ""none"",
+    ""clarification_questions"": [],
+    ""estimated_complexity"": ""simple"",
+    ""reasoning"": ""User requests Oracle database info, which directly maps to OracleDbTools_GetDatabaseInfo tool.""
 }}
 
 Time-sensitive request:
@@ -169,7 +201,7 @@ Unclear request needing clarification:
         return $"Recent topics: {string.Join(", ", recent)}";
     }
     
-    private IntentAnalysisResult ParseIntentResponse(string response)
+    private IntentAnalysisResult ParseIntentResponse(string response, string userInput)
     {
         try
         {
@@ -198,7 +230,7 @@ Unclear request needing clarification:
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to parse JSON response, using heuristic analysis");
-            return AnalyzeIntentHeuristically(response);
+            return AnalyzeIntentHeuristically(response, userInput);
         }
     }
     
@@ -216,16 +248,36 @@ Unclear request needing clarification:
         return response;
     }
     
-    private IntentAnalysisResult AnalyzeIntentHeuristically(string response)
+    private IntentAnalysisResult AnalyzeIntentHeuristically(string response, string userInput)
     {
         var lowerResponse = response.ToLower();
+        var lowerUserInput = userInput.ToLower();
         var result = new IntentAnalysisResult();
         
-        // 의도 추정
-        if (lowerResponse.Contains("tool") || lowerResponse.Contains("file") || lowerResponse.Contains("search") || lowerResponse.Contains("execute"))
+        // 사용자 입력에서 직접 데이터베이스 관련 키워드 우선 처리
+        if (lowerUserInput.Contains("database") || lowerUserInput.Contains("db") || 
+            lowerUserInput.Contains("oracle") || lowerUserInput.Contains("테이블") ||
+            lowerUserInput.Contains("스키마") || lowerUserInput.Contains("connection") ||
+            lowerUserInput.Contains("query") || lowerUserInput.Contains("select") ||
+            lowerUserInput.Contains("info") || lowerUserInput.Contains("정보"))
         {
             result.IntentType = "tool_usage";
-            result.ConfidenceScore = 0.6;
+            result.ConfidenceScore = 0.9;
+        }
+        // 응답에서 데이터베이스 관련 키워드 처리
+        else if (lowerResponse.Contains("database") || lowerResponse.Contains("db") || 
+            lowerResponse.Contains("oracle") || lowerResponse.Contains("테이블") ||
+            lowerResponse.Contains("스키마") || lowerResponse.Contains("connection") ||
+            lowerResponse.Contains("query") || lowerResponse.Contains("select"))
+        {
+            result.IntentType = "tool_usage";
+            result.ConfidenceScore = 0.85;
+        }
+        else if (lowerResponse.Contains("tool") || lowerResponse.Contains("file") || 
+                 lowerResponse.Contains("search") || lowerResponse.Contains("execute"))
+        {
+            result.IntentType = "tool_usage";
+            result.ConfidenceScore = 0.7;
         }
         else if (lowerResponse.Contains("complex") || lowerResponse.Contains("multiple") || lowerResponse.Contains("step"))
         {

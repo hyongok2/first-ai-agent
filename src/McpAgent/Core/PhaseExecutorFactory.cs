@@ -20,19 +20,22 @@ public class PhaseExecutorFactory : IPhaseExecutorFactory
             [1] = () => new IntentAnalysisExecutor(
                 _serviceProvider.GetRequiredService<ILogger<IntentAnalysisExecutor>>(),
                 _serviceProvider.GetRequiredService<ILlmProvider>(),
-                _serviceProvider.GetRequiredService<ISystemContextProvider>()),
+                _serviceProvider.GetRequiredService<ISystemContextProvider>(),
+                _serviceProvider.GetRequiredService<IDebugFileLogger>()),
                 
             [2] = () => new FunctionSelectionExecutor(
                 _serviceProvider.GetRequiredService<ILogger<FunctionSelectionExecutor>>(),
                 _serviceProvider.GetRequiredService<ILlmProvider>(),
                 _serviceProvider.GetRequiredService<ISystemContextProvider>(),
-                _serviceProvider.GetRequiredService<IMcpClient>()),
+                _serviceProvider.GetRequiredService<IMcpClient>(),
+                _serviceProvider.GetRequiredService<IDebugFileLogger>()),
                 
             [3] = () => new ParameterGenerationExecutor(
                 _serviceProvider.GetRequiredService<ILogger<ParameterGenerationExecutor>>(),
                 _serviceProvider.GetRequiredService<ILlmProvider>(),
                 _serviceProvider.GetRequiredService<ISystemContextProvider>(),
-                _serviceProvider.GetRequiredService<IMcpClient>()),
+                _serviceProvider.GetRequiredService<IMcpClient>(),
+                _serviceProvider.GetRequiredService<IDebugFileLogger>()),
                 
             [4] = () => new ToolExecutionExecutor(
                 _serviceProvider.GetRequiredService<ILogger<ToolExecutionExecutor>>(),
@@ -41,7 +44,8 @@ public class PhaseExecutorFactory : IPhaseExecutorFactory
             [5] = () => new ResponseSynthesisExecutor(
                 _serviceProvider.GetRequiredService<ILogger<ResponseSynthesisExecutor>>(),
                 _serviceProvider.GetRequiredService<ILlmProvider>(),
-                _serviceProvider.GetRequiredService<ISystemContextProvider>())
+                _serviceProvider.GetRequiredService<ISystemContextProvider>(),
+                _serviceProvider.GetRequiredService<IDebugFileLogger>())
         };
     }
     

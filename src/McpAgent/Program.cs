@@ -66,6 +66,7 @@ var builder = Host.CreateDefaultBuilder(args)
         services.AddHttpClient();
 
         // Core services
+        services.AddSingleton<IDebugFileLogger, DebugFileLogger>();
         services.AddSingleton<ILlmProvider, OllamaProvider>();
         services.AddSingleton<IMcpClient, McpClient>();
         services.AddSingleton<IConversationManager, InMemoryConversationManager>();
