@@ -4,6 +4,7 @@ using McpAgent.Domain.Interfaces;
 using McpAgent.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
+using McpAgent.Presentation.Console;
 
 namespace McpAgent.Application.Services;
 
@@ -14,19 +15,21 @@ public class CapabilitySelectionService : ICapabilitySelectionService
     private readonly ILogger<CapabilitySelectionService> _logger;
     private readonly IRequestResponseLogger _requestResponseLogger;
     private readonly IToolExecutor _toolExecutor;
+    private readonly ConsoleUIService _consoleUIService;
 
     public CapabilitySelectionService(
         ILlmProvider llmProvider,
         IPromptService promptService,
         ILogger<CapabilitySelectionService> logger,
         IRequestResponseLogger requestResponseLogger,
-        IToolExecutor toolExecutor)
+        IToolExecutor toolExecutor, ConsoleUIService consoleUIService)
     {
         _llmProvider = llmProvider;
         _promptService = promptService;
         _logger = logger;
         _requestResponseLogger = requestResponseLogger;
         _toolExecutor = toolExecutor;
+        _consoleUIService = consoleUIService;
     }
 
     public async Task<SystemCapability> SelectCapabilityAsync(
@@ -40,6 +43,8 @@ public class CapabilitySelectionService : ICapabilitySelectionService
         try
         {
             _logger.LogInformation("Selecting capability for intent: {Intent}", refinedInput.ClarifiedIntent);
+            
+            _consoleUIService.DisplayProcess("사용할 기능을 선택 중입니다...");
 
             // Load the capability selection prompt template
             var promptTemplate = await _promptService.GetPromptAsync("capability-selection");
@@ -72,7 +77,7 @@ public class CapabilitySelectionService : ICapabilitySelectionService
 
             // LLM 요청/응답 로깅
             _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
-                "qwen3:32b", "CapabilitySelection", prompt, response,stopwatch.Elapsed.TotalMilliseconds, cancellationToken));
+                _llmProvider.GetLlmModel(), "CapabilitySelection", prompt, response,stopwatch.Elapsed.TotalMilliseconds, cancellationToken));
             
             // Parse the JSON response
             var selectedCapability = ParseCapabilitySelection(response);

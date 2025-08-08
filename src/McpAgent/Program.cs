@@ -76,6 +76,9 @@ try
             services.AddSingleton<ILlmProvider, OllamaProvider>(); // New interface for multi-step pipeline
             services.AddSingleton<IPromptService, PromptService>();
             services.AddSingleton<IToolExecutor, McpToolExecutor>();
+            // LLM 요약 기반의 메모리 효율적인 대화 관리
+            services.AddSingleton<ISummarizedConversationRepository, InMemorySummarizedConversationRepository>();
+            // 호환성을 위해 기존 인터페이스도 유지 (사용되지 않음)
             services.AddSingleton<IConversationRepository, InMemoryConversationRepository>();
 
             // MCP Client Adapter (using proper MCP protocol implementation)

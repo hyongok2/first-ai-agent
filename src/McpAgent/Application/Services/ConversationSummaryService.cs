@@ -51,6 +51,10 @@ public class ConversationSummaryService : IConversationSummaryService
         {
             _logger.LogInformation("Summarizing turn {Turn}", turnNumber);
             _consoleUIService.DisplayProcess("진행 내용을 요약 중입니다...");
+            
+            // 대화 ID 결정 (systemContext에서 추출하거나 기본값 사용)
+            var conversationId = ExtractConversationId(systemContext) ?? "default";
+            
             // Load the conversation summary prompt template
             var promptTemplate = await _promptService.GetPromptAsync("conversation-summary");
 
@@ -78,12 +82,27 @@ public class ConversationSummaryService : IConversationSummaryService
 
             // LLM 요청/응답 로깅
             _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
-                "qwen3:32b", "ConversationSummary", prompt, response, stopwatch.Elapsed.TotalMilliseconds, cancellationToken));
+                _llmProvider.GetLlmModel(), "ConversationSummary", prompt, response, stopwatch.Elapsed.TotalMilliseconds, cancellationToken));
 
             // Parse the JSON response
             var turnSummary = ParseTurnSummary(response, turnNumber);
+            
+            // 실제 데이터로 TurnSummary 완성
+            turnSummary = new TurnSummary(
+                turnNumber,
+                originalInput,
+                refinedInput.RefinedQuery,
+                selectedCapability.Type,
+                toolExecutions.ToList(),
+                finalResponse,
+                turnSummary.OverallSummary
+            );
+            
+            // 대화 요약 업데이트 (자동 저장)
+            await UpdateConversationSummaryAsync(conversationId, turnSummary, systemContext, cancellationToken);
 
-            _logger.LogInformation("Turn {Turn} summarized successfully", turnNumber);
+            _logger.LogInformation("Turn {Turn} summarized and saved successfully for conversation {ConversationId}", 
+                turnNumber, conversationId);
 
             return turnSummary;
         }
@@ -379,5 +398,51 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
             finalResponse,
             $"턴 {turnNumber} 폴백 요약 - 입력: {originalInput.Substring(0, Math.Min(50, originalInput.Length))}... 응답: {finalResponse.Substring(0, Math.Min(50, finalResponse.Length))}..."
         );
+    }
+    
+    /// <summary>
+    /// 대화 요약을 강제로 저장합니다. (요청 완료 시 호출)
+    /// </summary>
+    public async Task SaveConversationTurnAsync(
+        string conversationId,
+        int turnNumber,
+        string originalInput,
+        RefinedInput refinedInput,
+        SystemCapability selectedCapability,
+        IReadOnlyList<ToolExecution> toolExecutions,
+        string finalResponse,
+        string systemContext,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var turnSummary = await SummarizeTurnAsync(
+                turnNumber,
+                originalInput,
+                refinedInput,
+                selectedCapability,
+                toolExecutions,
+                finalResponse,
+                systemContext,
+                cancellationToken);
+            
+            _logger.LogInformation("Conversation turn saved for {ConversationId}, turn {Turn}", 
+                conversationId, turnNumber);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save conversation turn for {ConversationId}", conversationId);
+        }
+    }
+    
+    private string? ExtractConversationId(string systemContext)
+    {
+        // systemContext에서 대화 ID를 추출하는 로직
+        // 예: "AI 에이전트 - 대화ID: abc123" -> "abc123"
+        if (string.IsNullOrEmpty(systemContext))
+            return null;
+            
+        var match = System.Text.RegularExpressions.Regex.Match(systemContext, @"대화ID:\s*([\w-]+)");
+        return match.Success ? match.Groups[1].Value : null;
     }
 }

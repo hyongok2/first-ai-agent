@@ -43,8 +43,8 @@ public class ConsoleUIService
 
     public void DisplayProcess(string message)
     {
-        System.Console.ForegroundColor = ConsoleColor.Gray;
-        System.Console.WriteLine($"진행 단계: {message}");
+        System.Console.ForegroundColor = ConsoleColor.DarkGray;
+        System.Console.WriteLine($"\n진행 단계: {message}");
         System.Console.ResetColor();
     }
 
