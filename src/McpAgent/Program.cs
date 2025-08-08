@@ -5,6 +5,7 @@ using McpAgent.Application.Interfaces;
 using McpAgent.Application.Services;
 using McpAgent.Configuration;
 using McpAgent.Domain.Interfaces;
+using McpAgent.Domain.Services;
 using McpAgent.Infrastructure.LLM;
 using McpAgent.Infrastructure.Logging;
 using McpAgent.Infrastructure.MCP;
@@ -16,7 +17,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 try
 {
@@ -41,7 +41,7 @@ try
         {
             // Configuration
             services.Configure<AgentConfiguration>(context.Configuration.GetSection("Agent"));
-            services.Configure<McpAgent.Configuration.LlmConfiguration>(context.Configuration.GetSection("Agent:Llm"));
+            services.Configure<LlmConfiguration>(context.Configuration.GetSection("Agent:Llm"));
             
             // Logging (파일 로깅만, 콘솔 로깅 제거)
             services.AddLogging(builder =>
@@ -58,7 +58,7 @@ try
             services.AddSingleton<IRequestResponseLogger, FileRequestResponseLogger>();
 
             // Core Agent Orchestrator (using new multi-step pipeline version)
-            services.AddSingleton<McpAgent.Domain.Services.AgentOrchestrator>();
+            services.AddSingleton<AgentOrchestrator>();
 
             // Multi-Step Pipeline Services (using working fallback implementations)
             services.AddSingleton<IInputRefinementService, InputRefinementService>();

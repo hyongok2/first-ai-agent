@@ -16,8 +16,8 @@ public class ConsoleUIService
 
     public void DisplayWelcomeMessage(string sessionId)
     {
-        System.Console.WriteLine($"\\n🤖 McpAgent ready! Session: {sessionId[..SessionIdDisplayLength]}...");
-        System.Console.WriteLine("Type 'help' for commands or start chatting!");
+        System.Console.WriteLine($"🤖 McpAgent 초기화 완료! Session: {sessionId[..SessionIdDisplayLength]}");
+        System.Console.WriteLine("📝 이제부터 자유롭게 대화하실 수 있습니다.");
     }
 
     public void DisplaySuccessMessage(string message)
@@ -54,7 +54,7 @@ Available commands:
 
 The agent has access to MCP tools and can help you with various tasks.
 Your current session preserves conversation history for context.";
-        
+
         System.Console.WriteLine(helpMessage);
     }
 
@@ -62,7 +62,7 @@ Your current session preserves conversation history for context.";
     {
         const string sectionHeader = "\\n🔧 Available MCP Tools:";
         const string separator = "=======================================================";
-        
+
         System.Console.WriteLine(sectionHeader);
         System.Console.WriteLine(separator);
 

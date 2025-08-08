@@ -38,15 +38,8 @@ public class AgentHostService : BackgroundService
             _logger.LogInformation("AI Agent started. Type 'quit' or 'exit' to stop.");
             _logger.LogInformation("Starting interactive session with ID: {SessionId}", sessionId);
 
-            // 초기화 성공 메시지를 콘솔에 직접 출력
-            System.Console.WriteLine("🎉 McpAgent 초기화 완료!");
-            System.Console.WriteLine("✅ MCP 서버 연결됨, LLM 서비스 준비됨");
-            System.Console.WriteLine("📝 이제부터 자유롭게 대화하실 수 있습니다.");
-            System.Console.WriteLine();
-
             // Display welcome message
             _consoleUI.DisplayWelcomeMessage(sessionId);
-            _consoleUI.DisplaySuccessMessage("✅ All systems ready");
 
             // Start interactive session
             await _interactiveHost.RunInteractiveSessionAsync(sessionId, stoppingToken);
