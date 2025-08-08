@@ -1,3 +1,4 @@
+using System.Text;
 using McpAgent.Domain.Entities;
 using McpAgent.Domain.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -11,6 +12,8 @@ public class ConsoleUIService
 
     public ConsoleUIService(ILogger<ConsoleUIService> logger)
     {
+        System.Console.OutputEncoding = Encoding.UTF8;
+        System.Console.InputEncoding = Encoding.UTF8;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
