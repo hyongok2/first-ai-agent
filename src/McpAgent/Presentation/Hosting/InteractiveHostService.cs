@@ -8,8 +8,8 @@ namespace McpAgent.Presentation.Hosting;
 
 public class InteractiveHostService
 {
-    private const string UserPrompt = "\\nYou: ";
-    private const string AssistantPrompt = "Assistant: ";
+    private const string UserPrompt = "\n💬 질문을 입력하세요: ";
+    private const string AssistantPrompt = "🤖 챗봇이 응답합니다: ";
 
     private readonly ILogger<InteractiveHostService> _logger;
     private readonly IAgentService _agentService;
@@ -40,20 +40,17 @@ public class InteractiveHostService
                 if (input == null) break; // EOF or cancellation
 
                 if (string.IsNullOrWhiteSpace(input)) continue;
-                
+
                 var commandResult = await _commandHandler.HandleCommandAsync(input, currentSessionId, cancellationToken);
-                
+
                 if (commandResult.ShouldExit) break;
-                
+
                 if (commandResult.WasHandled)
                 {
+                    if (commandResult.NewSessionId == null) continue;
                     // Update session if a new one was created
-                    if (commandResult.NewSessionId != null)
-                    {
-                        currentSessionId = commandResult.NewSessionId;
-                        _consoleUI.DisplayNewSessionMessage(currentSessionId);
-                    }
-                    continue;
+                    currentSessionId = commandResult.NewSessionId;
+                    _consoleUI.DisplayNewSessionMessage(currentSessionId);
                 }
 
                 await ProcessUserMessageAsync(input, currentSessionId, cancellationToken);
@@ -65,7 +62,7 @@ public class InteractiveHostService
             }
         }
 
-        System.Console.WriteLine("Goodbye!");
+        System.Console.WriteLine("\n✨ 챗봇을 종료합니다. 안녕히 가세요, 또 만나요!!👋");
     }
 
     private async Task<string?> GetUserInputAsync(CancellationToken cancellationToken)

@@ -37,7 +37,10 @@ public class LlmConfiguration
         { "phi3:mini", 4096 },
         { "gemma:7b", 8192 },
         { "neural-chat:7b", 4096 },
-        { "gpt-oss:20b", 32768 }  // 현재 사용 중인 모델 추가
+        { "gpt-oss:20b", 32768 },
+        { "qwen3:32b", 32768 },
+        { "qwen3:30b", 32768 },
+        { "qwen3:14b", 32768 }
     };
     
     /// <summary>

@@ -34,8 +34,7 @@ public class AgentHostService : BackgroundService
             // Create initial session
             var sessionId = Guid.NewGuid().ToString();
             
-            // 시스템 로깅은 파일로만, 사용자 메시지는 콘솔에 직접 출력
-            _logger.LogInformation("AI Agent started. Type 'quit' or 'exit' to stop.");
+            _logger.LogInformation("AI Agent started.");
             _logger.LogInformation("Starting interactive session with ID: {SessionId}", sessionId);
 
             // Display welcome message
