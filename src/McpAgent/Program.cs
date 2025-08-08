@@ -73,7 +73,6 @@ try
             services.AddSingleton<CommandHandlerService>();
 
             // Infrastructure Services
-            services.AddSingleton<ILlmService, OllamaLlmService>();
             services.AddSingleton<ILlmProvider, OllamaProvider>(); // New interface for multi-step pipeline
             services.AddSingleton<IPromptService, PromptService>();
             services.AddSingleton<IToolExecutor, McpToolExecutor>();

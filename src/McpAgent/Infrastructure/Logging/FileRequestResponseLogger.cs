@@ -17,24 +17,26 @@ public class FileRequestResponseLogger : IRequestResponseLogger
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _logDirectory = Path.Combine(Directory.GetCurrentDirectory(), "Logs", "RequestResponse");
-        
+
         // 로그 디렉터리 생성
         Directory.CreateDirectory(_logDirectory);
     }
 
-    public async Task LogLlmRequestResponseAsync(string model, string stage, string request, string response, CancellationToken cancellationToken = default)
+    public async Task LogLlmRequestResponseAsync(string model, string stage, string request, string response, double elapsedMilliseconds, CancellationToken cancellationToken = default)
     {
-        var dateStr = DateTime.Now.ToString("yyyy-MM-dd-HH-mm-ss-fff");
+        DateTime now = DateTime.Now;
+        var dateStr = now.ToString("yyyy-MM-dd-HH-mm-ss-fff");
         // Windows에서 콜론은 파일명에 사용할 수 없으므로 대체
         var safeModel = model.Replace(":", "-");
         var fileName = $"{dateStr}-{safeModel}-{stage}.log";
-        var filePath = Path.Combine(_logDirectory, "LLM", fileName);
-        
+        var filePath = Path.Combine(_logDirectory, now.ToString("yyyy-MM-dd"), fileName);
+
         var content = new StringBuilder();
         content.AppendLine("=== LLM REQUEST/RESPONSE LOG ===");
-        content.AppendLine($"Timestamp: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
+        content.AppendLine($"Timestamp: {now:yyyy-MM-dd HH:mm:ss.fff}");
         content.AppendLine($"Model: {model}");
         content.AppendLine($"Stage: {stage}");
+        content.AppendLine($"Elapsed (ms): {elapsedMilliseconds}");
         content.AppendLine();
         content.AppendLine("=== REQUEST ===");
         content.AppendLine(request);
@@ -47,17 +49,19 @@ public class FileRequestResponseLogger : IRequestResponseLogger
         await WriteToFileAsync(filePath, content.ToString(), cancellationToken);
     }
 
-    public async Task LogMcpRequestResponseAsync(string mcpServer, string toolName, string request, string response, CancellationToken cancellationToken = default)
+    public async Task LogMcpRequestResponseAsync(string mcpServer, string toolName, string request, string response, double elapsedMilliseconds, CancellationToken cancellationToken = default)
     {
-        var dateStr = DateTime.Now.ToString("yyyy-MM-dd-HH-mm-ss-fff");
+        DateTime now = DateTime.Now;
+        var dateStr = now.ToString("yyyy-MM-dd-HH-mm-ss-fff");
         var fileName = $"{dateStr}-{mcpServer}-{toolName}.log";
-        var filePath = Path.Combine(_logDirectory, "MCP", fileName);
-        
+        var filePath = Path.Combine(_logDirectory, now.ToString("yyyy-MM-dd"), fileName);
+
         var content = new StringBuilder();
         content.AppendLine("=== MCP REQUEST/RESPONSE LOG ===");
-        content.AppendLine($"Timestamp: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
+        content.AppendLine($"Timestamp: {now:yyyy-MM-dd HH:mm:ss.fff}");
         content.AppendLine($"MCP Server: {mcpServer}");
         content.AppendLine($"Tool Name: {toolName}");
+        content.AppendLine($"Elapsed (ms): {elapsedMilliseconds}");
         content.AppendLine();
         content.AppendLine("=== REQUEST ===");
         content.AppendLine(request);
@@ -85,7 +89,7 @@ public class FileRequestResponseLogger : IRequestResponseLogger
             {
                 File.WriteAllTextAsync(filePath, content, Encoding.UTF8, cancellationToken).Wait(cancellationToken);
             }
-            
+
             _logger.LogDebug("Request/Response logged to file: {FilePath}", filePath);
         }
         catch (Exception ex)

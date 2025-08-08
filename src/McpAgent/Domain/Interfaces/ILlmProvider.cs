@@ -16,22 +16,16 @@ public interface ILlmProvider
     Task<string> GenerateResponseAsync(string prompt, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 도구 사용을 고려한 응답을 생성합니다.
-    /// </summary>
-    /// <param name="prompt">프롬프트</param>
-    /// <param name="availableTools">사용 가능한 도구들</param>
-    /// <param name="cancellationToken">취소 토큰</param>
-    /// <returns>LLM 응답</returns>
-    Task<string> GenerateResponseWithToolsAsync(
-        string prompt, 
-        IReadOnlyList<ToolDefinition> availableTools, 
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// 스트리밍 응답을 생성합니다.
     /// </summary>
     /// <param name="prompt">프롬프트</param>
     /// <param name="cancellationToken">취소 토큰</param>
     /// <returns>스트리밍 응답</returns>
     IAsyncEnumerable<string> GenerateStreamingResponseAsync(string prompt, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// LLM Model 정보를 가져옵니다.
+    /// </summary>
+    /// <returns></returns>
+    string GetLlmModel();
 }

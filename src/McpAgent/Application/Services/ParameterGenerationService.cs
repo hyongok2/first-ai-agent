@@ -3,6 +3,7 @@ using McpAgent.Domain.Entities;
 using McpAgent.Domain.Interfaces;
 using McpAgent.Application.Interfaces;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 
 namespace McpAgent.Application.Services;
 
@@ -61,12 +62,16 @@ public class ParameterGenerationService : IParameterGenerationService
                 .Replace("{REFINED_QUERY}", refinedInput.RefinedQuery)
                 .Replace("{EXTRACTED_ENTITIES}", FormatExtractedEntities(refinedInput.ExtractedEntities));
 
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            
             // Call LLM to generate parameters
             var response = await _llmProvider.GenerateResponseAsync(prompt, cancellationToken);
             
+            stopwatch.Stop();
+
             // LLM 요청/응답 로깅
             _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
-                "qwen3:32b", "ParameterGeneration", prompt, response, cancellationToken));
+                "qwen3:32b", "ParameterGeneration", prompt, response, stopwatch.ElapsedMilliseconds, cancellationToken));
             
             // Parse the JSON response and extract parameters only
             var parameterResult = ParseParameterResult(response, toolName);

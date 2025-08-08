@@ -3,6 +3,7 @@ using McpAgent.Domain.Entities;
 using McpAgent.Domain.Interfaces;
 using McpAgent.Application.Interfaces;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 
 namespace McpAgent.Application.Services;
 
@@ -48,11 +49,11 @@ public class ConversationSummaryService : IConversationSummaryService
 
             // Load the conversation summary prompt template
             var promptTemplate = await _promptService.GetPromptAsync("conversation-summary");
-            
+
             // Format complex objects
             var toolExecutionsText = FormatToolExecutions(toolExecutions);
             var currentTimeText = GetCurrentTimeInfo();
-            
+
             // Replace placeholders in the template
             var prompt = promptTemplate
                 .Replace("{SYSTEM_CONTEXT}", systemContext)
@@ -64,25 +65,29 @@ public class ConversationSummaryService : IConversationSummaryService
                 .Replace("{TOOL_EXECUTIONS}", toolExecutionsText)
                 .Replace("{FINAL_RESPONSE}", finalResponse);
 
+            Stopwatch stopwatch = Stopwatch.StartNew();
+
             // Call LLM to summarize the turn
             var response = await _llmProvider.GenerateResponseAsync(prompt, cancellationToken);
-            
+
+            stopwatch.Stop();
+
             // LLM 요청/응답 로깅
             _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
-                "qwen3:32b", "ConversationSummary", prompt, response, cancellationToken));
-            
+                "qwen3:32b", "ConversationSummary", prompt, response, stopwatch.Elapsed.TotalMilliseconds, cancellationToken));
+
             // Parse the JSON response
             var turnSummary = ParseTurnSummary(response, turnNumber);
-            
+
             _logger.LogInformation("Turn {Turn} summarized successfully", turnNumber);
-            
+
             return turnSummary;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to summarize turn {Turn}", 
+            _logger.LogError(ex, "Failed to summarize turn {Turn}",
                 turnNumber);
-            
+
             // Return fallback turn summary
             return CreateFallbackTurnSummary(turnNumber, originalInput, finalResponse);
         }
@@ -101,14 +106,14 @@ public class ConversationSummaryService : IConversationSummaryService
         CancellationToken cancellationToken = default)
     {
         var summary = await GetConversationSummaryAsync(conversationId, cancellationToken);
-        
+
         if (summary.TotalTurns == 0)
         {
             return "대화 이력이 없습니다.";
         }
 
         var history = new List<string>();
-        
+
         // Add consolidated summary if available
         if (!string.IsNullOrEmpty(summary.ConsolidatedSummary))
         {
@@ -121,7 +126,7 @@ public class ConversationSummaryService : IConversationSummaryService
         if (summary.IndividualTurns.Any())
         {
             history.Add($"=== 최근 개별 턴 요약 ({summary.IndividualTurns.Count}턴) ===");
-            
+
             foreach (var turn in summary.IndividualTurns.OrderBy(t => t.TurnNumber))
             {
                 history.Add($"턴 {turn.TurnNumber}: {turn.OverallSummary}");
@@ -157,20 +162,20 @@ public class ConversationSummaryService : IConversationSummaryService
     {
         var now = DateTime.Now;
         var utcNow = DateTime.UtcNow;
-        
+
         return $@"현재 시간: {now:yyyy-MM-dd HH:mm:ss} (현지 시간)
 UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
-요일: {now.DayOfWeek switch 
-{
-    DayOfWeek.Monday => "월요일",
-    DayOfWeek.Tuesday => "화요일", 
-    DayOfWeek.Wednesday => "수요일",
-    DayOfWeek.Thursday => "목요일",
-    DayOfWeek.Friday => "금요일",
-    DayOfWeek.Saturday => "토요일",
-    DayOfWeek.Sunday => "일요일",
-    _ => now.DayOfWeek.ToString()
-}}
+요일: {now.DayOfWeek switch
+        {
+            DayOfWeek.Monday => "월요일",
+            DayOfWeek.Tuesday => "화요일",
+            DayOfWeek.Wednesday => "수요일",
+            DayOfWeek.Thursday => "목요일",
+            DayOfWeek.Friday => "금요일",
+            DayOfWeek.Saturday => "토요일",
+            DayOfWeek.Sunday => "일요일",
+            _ => now.DayOfWeek.ToString()
+        }}
 타임존: {TimeZoneInfo.Local.DisplayName}";
     }
 
@@ -196,9 +201,9 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
             {
                 var consolidatedSummary = await ConsolidateTurnSummariesAsync(
                     conversationSummary.IndividualTurns, systemContext, cancellationToken);
-                
+
                 conversationSummary.SetConsolidatedSummary(consolidatedSummary);
-                
+
                 _logger.LogInformation("Consolidated summary created for conversation {ConversationId}", conversationId);
             }
             catch (Exception ex)
@@ -217,28 +222,28 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
     {
         // Load the consolidation summary prompt template
         var promptTemplate = await _promptService.GetPromptAsync("consolidation-summary");
-        
+
         // Prepare individual turn summaries text
-        var turnSummariesText = string.Join('\n', 
+        var turnSummariesText = string.Join('\n',
             individualTurns.Select(t => $"턴 {t.TurnNumber}: {t.OverallSummary}"));
         var currentTimeText = GetCurrentTimeInfo();
-        
+
         // Replace placeholders in the template
         var prompt = promptTemplate
             .Replace("{SYSTEM_CONTEXT}", systemContext)
             .Replace("{CURRENT_TIME}", currentTimeText)
             .Replace("{INDIVIDUAL_TURN_SUMMARIES}", turnSummariesText);
-
+        Stopwatch stopwatch = Stopwatch.StartNew();
         // Call LLM to consolidate summaries
         var response = await _llmProvider.GenerateResponseAsync(prompt, cancellationToken);
-        
+        stopwatch.Stop();
         // LLM 요청/응답 로깅
         _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
-            "qwen3:32b", "ConsolidationSummary", prompt, response, cancellationToken));
-        
+            _llmProvider.GetLlmModel(), "ConsolidationSummary", prompt, response,stopwatch.ElapsedMilliseconds, cancellationToken));
+
         // Parse the JSON response and extract consolidated summary
         var consolidationResult = ParseConsolidationResult(response);
-        
+
         return consolidationResult;
     }
 
@@ -248,18 +253,18 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
         {
             // Extract JSON from response if it's wrapped in markdown
             var jsonResponse = ExtractJsonFromResponse(response);
-            
+
             var jsonDocument = JsonDocument.Parse(jsonResponse);
             var root = jsonDocument.RootElement;
 
             // Parse the response and create a comprehensive summary string
-            var overallSummary = root.TryGetProperty("overall_summary", out var summary) 
+            var overallSummary = root.TryGetProperty("overall_summary", out var summary)
                 ? summary.GetString() ?? "" : "";
-            var userIntent = root.TryGetProperty("user_intent", out var intent) 
+            var userIntent = root.TryGetProperty("user_intent", out var intent)
                 ? intent.GetString() ?? "" : "";
-            var systemAction = root.TryGetProperty("system_action", out var action) 
+            var systemAction = root.TryGetProperty("system_action", out var action)
                 ? action.GetString() ?? "" : "";
-            var outcome = root.TryGetProperty("outcome", out var resultOutcome) 
+            var outcome = root.TryGetProperty("outcome", out var resultOutcome)
                 ? resultOutcome.GetString() ?? "" : "";
 
             // Combine all analysis into a comprehensive summary
@@ -294,11 +299,11 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
         {
             // Extract JSON from response if it's wrapped in markdown
             var jsonResponse = ExtractJsonFromResponse(response);
-            
+
             var jsonDocument = JsonDocument.Parse(jsonResponse);
             var root = jsonDocument.RootElement;
 
-            return root.TryGetProperty("consolidated_summary", out var summary) 
+            return root.TryGetProperty("consolidated_summary", out var summary)
                 ? summary.GetString() ?? "" : "";
         }
         catch (JsonException ex)
@@ -311,7 +316,7 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
     private List<string> ParseStringArray(JsonElement root, string propertyName)
     {
         var result = new List<string>();
-        
+
         if (root.TryGetProperty(propertyName, out var arrayElement) &&
             arrayElement.ValueKind == JsonValueKind.Array)
         {
@@ -324,7 +329,7 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
                 }
             }
         }
-        
+
         return result;
     }
 
@@ -360,7 +365,7 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
     private TurnSummary CreateFallbackTurnSummary(int turnNumber, string originalInput, string finalResponse)
     {
         _logger.LogWarning("Creating fallback turn summary for turn {Turn}", turnNumber);
-        
+
         return new TurnSummary(
             turnNumber,
             originalInput,

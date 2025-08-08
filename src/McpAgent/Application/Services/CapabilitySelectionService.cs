@@ -3,6 +3,7 @@ using McpAgent.Domain.Entities;
 using McpAgent.Domain.Interfaces;
 using McpAgent.Application.Interfaces;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 
 namespace McpAgent.Application.Services;
 
@@ -62,12 +63,16 @@ public class CapabilitySelectionService : ICapabilitySelectionService
                 .Replace("{CONFIDENCE_LEVEL}", refinedInput.IntentConfidence.ToString())
                 .Replace("{TOOL_EXECUTION_RESULTS}", toolResultsText);
 
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            
             // Call LLM to select capability
             var response = await _llmProvider.GenerateResponseAsync(prompt, cancellationToken);
-            
+
+            stopwatch.Stop();
+
             // LLM 요청/응답 로깅
             _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
-                "qwen3:32b", "CapabilitySelection", prompt, response, cancellationToken));
+                "qwen3:32b", "CapabilitySelection", prompt, response,stopwatch.Elapsed.TotalMilliseconds, cancellationToken));
             
             // Parse the JSON response
             var selectedCapability = ParseCapabilitySelection(response);

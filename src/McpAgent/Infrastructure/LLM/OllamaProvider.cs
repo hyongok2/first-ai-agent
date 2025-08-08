@@ -18,11 +18,13 @@ public class OllamaProvider : ILlmProvider
     private readonly LlmConfiguration _config;
     private readonly Kernel _kernel;
 
+    private readonly string _llmModel;
+
     public OllamaProvider(ILogger<OllamaProvider> logger, IOptions<LlmConfiguration> options)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _config = options.Value ?? throw new ArgumentNullException(nameof(options));
-
+        _llmModel = _config.Model;
         _kernel = Kernel.CreateBuilder()
             .AddOllamaChatCompletion(
                 modelId: _config.Model,
@@ -40,7 +42,7 @@ public class OllamaProvider : ILlmProvider
             var result = response.GetValue<string>() ?? string.Empty;
 
             _logger.LogDebug("Generated response length: {Length}", result.Length);
-            
+
             return result;
         }
         catch (Exception ex)
@@ -50,52 +52,22 @@ public class OllamaProvider : ILlmProvider
         }
     }
 
-    public async Task<string> GenerateResponseWithToolsAsync(
-        string prompt, 
-        IReadOnlyList<ToolDefinition> availableTools, 
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            _logger.LogDebug("Generating response with {ToolCount} available tools", availableTools.Count);
-
-            // For now, we'll include tool information in the prompt
-            // In a more sophisticated implementation, this would use function calling
-            var toolsDescription = string.Join("\n", 
-                availableTools.Select(t => $"- {t.Name}: {t.Description}"));
-            
-            var enhancedPrompt = $"{prompt}\n\n사용 가능한 도구들:\n{toolsDescription}";
-
-            var response = await _kernel.InvokePromptAsync(enhancedPrompt, cancellationToken: cancellationToken);
-            var result = response.GetValue<string>() ?? string.Empty;
-
-            _logger.LogDebug("Generated response with tools, length: {Length}", result.Length);
-            
-            return result;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to generate response with tools from Ollama");
-            throw new AgentException("LLM_ERROR", "LLM generation with tools failed", ex);
-        }
-    }
-
     public async IAsyncEnumerable<string> GenerateStreamingResponseAsync(string prompt, CancellationToken cancellationToken = default)
     {
         // For now, provide a simple non-streaming implementation
         // In a real implementation, this would use streaming capabilities
         var result = await GenerateResponseAsync(prompt, cancellationToken);
-        
+
         // Split the result into chunks to simulate streaming
         const int chunkSize = 50;
         for (int i = 0; i < result.Length; i += chunkSize)
         {
             if (cancellationToken.IsCancellationRequested)
                 yield break;
-                
+
             var chunk = result.Substring(i, Math.Min(chunkSize, result.Length - i));
             yield return chunk;
-            
+
             // Small delay to simulate streaming
             await Task.Delay(10, cancellationToken);
         }
@@ -118,5 +90,10 @@ public class OllamaProvider : ILlmProvider
             _logger.LogWarning(ex, "Ollama availability check failed");
             return false;
         }
+    }
+    
+    public string GetLlmModel()
+    {
+        return _llmModel;
     }
 }

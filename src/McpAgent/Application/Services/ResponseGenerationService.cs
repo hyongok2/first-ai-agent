@@ -2,6 +2,7 @@ using McpAgent.Domain.Entities;
 using McpAgent.Domain.Interfaces;
 using McpAgent.Application.Interfaces;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 
 namespace McpAgent.Application.Services;
 
@@ -37,23 +38,23 @@ public class ResponseGenerationService : IResponseGenerationService
     {
         try
         {
-            _logger.LogInformation("Generating response using response-generation prompt for capability: {Capability}", 
+            _logger.LogInformation("Generating response using response-generation prompt for capability: {Capability}",
                 selectedCapability.Type);
 
             // response-generation.txt 프롬프트 사용
             return await GenerateResponseUsingTemplate(
-                refinedInput, 
-                selectedCapability, 
-                systemContext, 
-                conversationHistory, 
-                toolExecutionResults, 
+                refinedInput,
+                selectedCapability,
+                systemContext,
+                conversationHistory,
+                toolExecutionResults,
                 cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to generate response for capability: {Capability}", 
+            _logger.LogError(ex, "Failed to generate response for capability: {Capability}",
                 selectedCapability.Type);
-            
+
             // Return fallback response
             return CreateFallbackResponse(refinedInput, selectedCapability);
         }
@@ -69,15 +70,15 @@ public class ResponseGenerationService : IResponseGenerationService
     {
         // response-generation.txt 프롬프트 로드
         var promptTemplate = await _promptService.GetPromptAsync("response-generation", cancellationToken);
-        
+
         // 대화 이력 포맷팅
         var historyText = FormatConversationHistory(conversationHistory);
-        
+
         // 도구 실행 결과 포맷팅
         var toolResultsText = FormatToolExecutionResults(toolExecutionResults);
         var availableMcpToolsText = await GetAvailableMcpToolsDescriptionAsync(cancellationToken);
         var currentTimeText = GetCurrentTimeInfo();
-        
+
         // 프롬프트 변수 치환
         var prompt = promptTemplate
             .Replace("{SYSTEM_CONTEXT}", systemContext ?? "AI 에이전트")
@@ -90,16 +91,19 @@ public class ResponseGenerationService : IResponseGenerationService
             .Replace("{CAPABILITY_TYPE}", selectedCapability.Type.ToString())
             .Replace("{CAPABILITY_REASONING}", selectedCapability.Reasoning)
             .Replace("{TOOL_EXECUTION_RESULTS}", toolResultsText);
+      
+        Stopwatch stopwatch = Stopwatch.StartNew();
 
         // LLM 호출 (response-generation 단계)
         var response = await _llmProvider.GenerateResponseAsync(prompt, cancellationToken);
-        
+
+        stopwatch.Stop();
         // LLM 요청/응답 로깅
         _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
-            "qwen3:32b", "ResponseGeneration", prompt, response, cancellationToken));
-        
+            _llmProvider.GetLlmModel(), "ResponseGeneration", prompt, response, stopwatch.ElapsedMilliseconds, cancellationToken));
+
         _logger.LogDebug("Response generation LLM response: {Response}", response);
-        
+
         return response;
     }
 
@@ -128,24 +132,24 @@ public class ResponseGenerationService : IResponseGenerationService
     {
         return selectedCapability.Type switch
         {
-            SystemCapabilityType.IntentClarification => 
+            SystemCapabilityType.IntentClarification =>
                 $"죄송하지만 '{refinedInput.OriginalInput}'에 대한 의도를 정확히 파악하지 못했습니다. 좀 더 구체적으로 설명해 주실 수 있나요?",
-            
-            SystemCapabilityType.SimpleChat => 
+
+            SystemCapabilityType.SimpleChat =>
                 "안녕하세요! 어떻게 도와드릴까요?",
-            
-            SystemCapabilityType.TaskCompletion => 
+
+            SystemCapabilityType.TaskCompletion =>
                 "요청하신 작업을 처리했습니다. 추가로 도움이 필요하시면 말씀해 주세요.",
-            
-            SystemCapabilityType.McpTool => 
+
+            SystemCapabilityType.McpTool =>
                 "도구를 실행했지만 결과를 처리하는 중 문제가 발생했습니다. 다시 시도해 주세요.",
-            
-            SystemCapabilityType.TaskPlanning => 
+
+            SystemCapabilityType.TaskPlanning =>
                 "작업 계획을 수립하는 중 문제가 발생했습니다. 요청을 다시 확인해 주세요.",
-            
-            SystemCapabilityType.ErrorHandling => 
+
+            SystemCapabilityType.ErrorHandling =>
                 "오류가 발생했습니다. 문제를 해결하기 위해 도움이 필요하시면 말씀해 주세요.",
-            
+
             _ => "죄송합니다. 응답을 생성하는 중 문제가 발생했습니다. 다시 시도해 주세요."
         };
     }
@@ -154,20 +158,20 @@ public class ResponseGenerationService : IResponseGenerationService
     {
         var now = DateTime.Now;
         var utcNow = DateTime.UtcNow;
-        
+
         return $@"현재 시간: {now:yyyy-MM-dd HH:mm:ss} (현지 시간)
 UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
-요일: {now.DayOfWeek switch 
-{
-    DayOfWeek.Monday => "월요일",
-    DayOfWeek.Tuesday => "화요일", 
-    DayOfWeek.Wednesday => "수요일",
-    DayOfWeek.Thursday => "목요일",
-    DayOfWeek.Friday => "금요일",
-    DayOfWeek.Saturday => "토요일",
-    DayOfWeek.Sunday => "일요일",
-    _ => now.DayOfWeek.ToString()
-}}
+요일: {now.DayOfWeek switch
+        {
+            DayOfWeek.Monday => "월요일",
+            DayOfWeek.Tuesday => "화요일",
+            DayOfWeek.Wednesday => "수요일",
+            DayOfWeek.Thursday => "목요일",
+            DayOfWeek.Friday => "금요일",
+            DayOfWeek.Saturday => "토요일",
+            DayOfWeek.Sunday => "일요일",
+            _ => now.DayOfWeek.ToString()
+        }}
 타임존: {TimeZoneInfo.Local.DisplayName}";
     }
 
@@ -176,7 +180,7 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
         try
         {
             var availableTools = await _toolExecutor.GetAvailableToolsAsync(cancellationToken);
-            
+
             if (availableTools == null || availableTools.Count == 0)
             {
                 return "현재 사용 가능한 MCP 도구가 없습니다.";
@@ -188,7 +192,7 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
 
             var header = $"=== 사용 가능한 MCP 도구 ({availableTools.Count}개) ===";
             var toolList = string.Join('\n', toolDescriptions);
-            
+
             return $"{header}\n{toolList}";
         }
         catch (Exception ex)

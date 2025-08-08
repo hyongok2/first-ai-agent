@@ -142,20 +142,24 @@ public class McpServerConnection : IAsyncDisposable
 
         try
         {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            
             var response = await SendRequestAsync<CallToolResult>(request, cancellationToken);
             var responseJson = JsonSerializer.Serialize(response, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase
             });
+            stopwatch.Stop();
 
             // MCP 요청/응답 로깅 (요청 완료 직후 파싱 전에)
             if (_requestResponseLogger != null)
             {
                 _ = Task.Run(() => _requestResponseLogger.LogMcpRequestResponseAsync(
-                    _serverName, 
-                    toolName, 
-                    requestJson, 
-                    responseJson, 
+                    _serverName,
+                    toolName,
+                    requestJson,
+                    responseJson,
+                    stopwatch.ElapsedMilliseconds,
                     CancellationToken.None));
             }
             
@@ -192,7 +196,8 @@ public class McpServerConnection : IAsyncDisposable
                     _serverName, 
                     toolName, 
                     requestJson, 
-                    $"Error: {ex.Message}", 
+                    $"Error: {ex.Message}",
+                    0, 
                     CancellationToken.None));
             }
 

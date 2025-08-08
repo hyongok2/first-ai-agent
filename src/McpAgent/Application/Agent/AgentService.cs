@@ -12,16 +12,16 @@ public class AgentService : IAgentService
     private readonly ILogger<AgentService> _logger;
     private readonly AgentOrchestrator _orchestrator;
     private readonly IMcpClientAdapter _mcpClient;
-    private readonly ILlmService _llmService;
+    private readonly ILlmProvider _llmProvider;
 
     private readonly ConsoleUIService _consoleUI;
 
-    public AgentService(ILogger<AgentService> logger, AgentOrchestrator orchestrator, IMcpClientAdapter mcpClient, ILlmService llmService, ConsoleUIService consoleUI)
+    public AgentService(ILogger<AgentService> logger, AgentOrchestrator orchestrator, IMcpClientAdapter mcpClient, ILlmProvider llmProvider, ConsoleUIService consoleUI)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _mcpClient = mcpClient ?? throw new ArgumentNullException(nameof(mcpClient));
-        _llmService = llmService ?? throw new ArgumentNullException(nameof(llmService));
+        _llmProvider = llmProvider ?? throw new ArgumentNullException(nameof(llmProvider));
         _consoleUI = consoleUI ?? throw new ArgumentNullException(nameof(consoleUI));
     }
 
@@ -116,33 +116,21 @@ public class AgentService : IAgentService
         {
             _logger.LogInformation("Testing LLM service connectivity...");
 
-            // LLM 서버에 실제 테스트 요청 전송
-            var isAvailable = await _llmService.IsAvailableAsync(cancellationToken);
+            // 간단한 테스트 요청으로 실제 응답 확인
+            var testResponse = await _llmProvider.GenerateResponseAsync(
+                "System health check. Please respond with 'OK'.", cancellationToken);
 
-            if (isAvailable)
+            if (!string.IsNullOrEmpty(testResponse))
             {
-                // 간단한 테스트 요청으로 실제 응답 확인
-                var testResponse = await _llmService.GenerateResponseAsync(
-                    "System health check. Please respond with 'OK'.",
-                    Array.Empty<ConversationMessage>(),
-                    cancellationToken);
-
-                if (!string.IsNullOrEmpty(testResponse))
-                {
-                    _logger.LogInformation("LLM health check passed - received response of {Length} characters", testResponse.Length);
-                    return true;
-                }
-                else
-                {
-                    _logger.LogWarning("LLM health check failed - empty response received");
-                    return false;
-                }
+                _logger.LogInformation("LLM health check passed - received response of {Length} characters", testResponse.Length);
+                return true;
             }
             else
             {
-                _logger.LogWarning("LLM service is not available");
+                _logger.LogWarning("LLM health check failed - empty response received");
                 return false;
             }
+
         }
         catch (Exception ex)
         {

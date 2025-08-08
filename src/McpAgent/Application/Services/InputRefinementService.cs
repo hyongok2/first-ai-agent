@@ -3,6 +3,7 @@ using McpAgent.Domain.Interfaces;
 using McpAgent.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
+using System.Diagnostics;
 
 namespace McpAgent.Application.Services;
 
@@ -12,20 +13,20 @@ namespace McpAgent.Application.Services;
 public class InputRefinementService : IInputRefinementService
 {
     private readonly ILogger<InputRefinementService> _logger;
-    private readonly ILlmService _llmService;
+    private readonly ILlmProvider _llmProvider;
     private readonly IPromptService _promptService;
     private readonly IRequestResponseLogger _requestResponseLogger;
     private readonly IToolExecutor _toolExecutor;
 
     public InputRefinementService(
-        ILogger<InputRefinementService> logger, 
-        ILlmService llmService, 
+        ILogger<InputRefinementService> logger,
+        ILlmProvider llmProvider,
         IPromptService promptService,
         IRequestResponseLogger requestResponseLogger,
         IToolExecutor toolExecutor)
     {
         _logger = logger;
-        _llmService = llmService;
+        _llmProvider = llmProvider;
         _promptService = promptService;
         _requestResponseLogger = requestResponseLogger;
         _toolExecutor = toolExecutor;
@@ -43,13 +44,13 @@ public class InputRefinementService : IInputRefinementService
 
             // input-refinement.txt 프롬프트 로드
             var promptTemplate = await _promptService.GetPromptAsync("input-refinement", cancellationToken);
-            
+
             // 대화 이력 포맷팅
             var historyText = FormatConversationHistory(conversationHistory);
             var availableMcpToolsText = await GetAvailableMcpToolsDescriptionAsync(cancellationToken);
             var availableCapabilitiesText = GetAvailableCapabilitiesDescription();
             var currentTimeText = GetCurrentTimeInfo();
-            
+
             // 프롬프트 변수 치환
             var prompt = promptTemplate
                 .Replace("{SYSTEM_CONTEXT}", systemContext ?? "AI 에이전트")
@@ -59,18 +60,22 @@ public class InputRefinementService : IInputRefinementService
                 .Replace("{CONVERSATION_HISTORY}", historyText)
                 .Replace("{USER_INPUT}", originalInput);
 
+            Stopwatch stopwatch = Stopwatch.StartNew();
+
             // LLM 호출 (input-refinement 단계)
-            var response = await _llmService.GenerateResponseAsync(prompt, conversationHistory, cancellationToken);
-            
+            var response = await _llmProvider.GenerateResponseAsync(prompt, cancellationToken);
+
+            stopwatch.Stop();
+
             // LLM 요청/응답 로깅
-            _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
-                "qwen3:32b", "InputRefinement", prompt, response, cancellationToken));
-            
+             _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
+                 _llmProvider.GetLlmModel(), "InputRefinement", prompt, response, stopwatch.ElapsedMilliseconds, cancellationToken));
+
             _logger.LogDebug("Input refinement LLM response: {Response}", response);
 
             // JSON 응답 파싱
             var refinementResult = ParseRefinementResponse(response);
-            
+
             if (refinementResult != null)
             {
                 _logger.LogInformation("Input refined successfully with confidence: {Confidence}", refinementResult.IntentConfidence);
@@ -105,17 +110,17 @@ public class InputRefinementService : IInputRefinementService
             // JSON 코드 블록에서 JSON 추출
             var jsonStart = response.IndexOf('{');
             var jsonEnd = response.LastIndexOf('}');
-            
+
             if (jsonStart >= 0 && jsonEnd > jsonStart)
             {
                 var jsonContent = response.Substring(jsonStart, jsonEnd - jsonStart + 1);
-                
+
                 var jsonDoc = JsonDocument.Parse(jsonContent);
                 var root = jsonDoc.RootElement;
 
                 var clarifiedIntent = root.GetProperty("clarified_intent").GetString() ?? "";
                 var refinedQuery = root.GetProperty("refined_query").GetString() ?? "";
-                
+
                 var entities = new List<string>();
                 if (root.TryGetProperty("extracted_entities", out var entitiesElement))
                 {
@@ -135,8 +140,8 @@ public class InputRefinementService : IInputRefinementService
                     }
                 }
 
-                var suggestedPlan = root.TryGetProperty("suggested_plan", out var planElement) 
-                    ? planElement.GetString() 
+                var suggestedPlan = root.TryGetProperty("suggested_plan", out var planElement)
+                    ? planElement.GetString()
                     : null;
 
                 var confidenceLevelStr = root.TryGetProperty("confidence_level", out var confidenceElement)
@@ -144,7 +149,7 @@ public class InputRefinementService : IInputRefinementService
                     : "Medium";
 
                 var confidenceLevel = Enum.TryParse<ConfidenceLevel>(confidenceLevelStr, out var parsedLevel)
-                    ? parsedLevel 
+                    ? parsedLevel
                     : ConfidenceLevel.Medium;
 
                 return new RefinedInput(
@@ -183,20 +188,20 @@ public class InputRefinementService : IInputRefinementService
     {
         var now = DateTime.Now;
         var utcNow = DateTime.UtcNow;
-        
+
         return $@"현재 시간: {now:yyyy-MM-dd HH:mm:ss} (현지 시간)
 UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
-요일: {now.DayOfWeek switch 
-{
-    DayOfWeek.Monday => "월요일",
-    DayOfWeek.Tuesday => "화요일", 
-    DayOfWeek.Wednesday => "수요일",
-    DayOfWeek.Thursday => "목요일",
-    DayOfWeek.Friday => "금요일",
-    DayOfWeek.Saturday => "토요일",
-    DayOfWeek.Sunday => "일요일",
-    _ => now.DayOfWeek.ToString()
-}}
+요일: {now.DayOfWeek switch
+        {
+            DayOfWeek.Monday => "월요일",
+            DayOfWeek.Tuesday => "화요일",
+            DayOfWeek.Wednesday => "수요일",
+            DayOfWeek.Thursday => "목요일",
+            DayOfWeek.Friday => "금요일",
+            DayOfWeek.Saturday => "토요일",
+            DayOfWeek.Sunday => "일요일",
+            _ => now.DayOfWeek.ToString()
+        }}
 타임존: {TimeZoneInfo.Local.DisplayName}";
     }
 
@@ -237,7 +242,7 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
         try
         {
             var availableTools = await _toolExecutor.GetAvailableToolsAsync(cancellationToken);
-            
+
             if (availableTools == null || availableTools.Count == 0)
             {
                 return "현재 사용 가능한 MCP 도구가 없습니다.";
@@ -249,7 +254,7 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
 
             var header = $"=== 사용 가능한 MCP 도구 ({availableTools.Count}개) ===";
             var toolList = string.Join('\n', toolDescriptions);
-            
+
             return $"{header}\n{toolList}";
         }
         catch (Exception ex)
