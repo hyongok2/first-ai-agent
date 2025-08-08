@@ -41,6 +41,13 @@ public class ConsoleUIService
         System.Console.ResetColor();
     }
 
+    public void DisplayProcess(string message)
+    {
+        System.Console.ForegroundColor = ConsoleColor.Gray;
+        System.Console.WriteLine($"진행 단계: {message}");
+        System.Console.ResetColor();
+    }
+
     public void ShowHelp()
     {
         const string helpMessage = @"

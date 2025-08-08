@@ -3,6 +3,7 @@ using McpAgent.Domain.Interfaces;
 using McpAgent.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
+using McpAgent.Presentation.Console;
 
 namespace McpAgent.Application.Services;
 
@@ -13,19 +14,21 @@ public class ResponseGenerationService : IResponseGenerationService
     private readonly ILogger<ResponseGenerationService> _logger;
     private readonly IRequestResponseLogger _requestResponseLogger;
     private readonly IToolExecutor _toolExecutor;
+    private readonly ConsoleUIService _consoleUIService;
 
     public ResponseGenerationService(
         ILlmProvider llmProvider,
         IPromptService promptService,
         ILogger<ResponseGenerationService> logger,
         IRequestResponseLogger requestResponseLogger,
-        IToolExecutor toolExecutor)
+        IToolExecutor toolExecutor, ConsoleUIService consoleUIService)
     {
         _llmProvider = llmProvider;
         _promptService = promptService;
         _logger = logger;
         _requestResponseLogger = requestResponseLogger;
         _toolExecutor = toolExecutor;
+        _consoleUIService = consoleUIService;
     }
 
     public async Task<string> GenerateResponseAsync(
@@ -40,7 +43,7 @@ public class ResponseGenerationService : IResponseGenerationService
         {
             _logger.LogInformation("Generating response using response-generation prompt for capability: {Capability}",
                 selectedCapability.Type);
-
+            _consoleUIService.DisplayProcess("사용자 응답을 생성 중입니다...");
             // response-generation.txt 프롬프트 사용
             return await GenerateResponseUsingTemplate(
                 refinedInput,
@@ -91,7 +94,7 @@ public class ResponseGenerationService : IResponseGenerationService
             .Replace("{CAPABILITY_TYPE}", selectedCapability.Type.ToString())
             .Replace("{CAPABILITY_REASONING}", selectedCapability.Reasoning)
             .Replace("{TOOL_EXECUTION_RESULTS}", toolResultsText);
-      
+
         Stopwatch stopwatch = Stopwatch.StartNew();
 
         // LLM 호출 (response-generation 단계)

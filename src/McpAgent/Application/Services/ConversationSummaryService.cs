@@ -4,6 +4,7 @@ using McpAgent.Domain.Interfaces;
 using McpAgent.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
+using McpAgent.Presentation.Console;
 
 namespace McpAgent.Application.Services;
 
@@ -15,6 +16,8 @@ public class ConversationSummaryService : IConversationSummaryService
     private readonly IRequestResponseLogger _requestResponseLogger;
     private readonly IToolExecutor _toolExecutor;
 
+    private readonly ConsoleUIService _consoleUIService;
+
     // In-memory storage for conversation summaries
     // In a production environment, this should be replaced with persistent storage
     private readonly Dictionary<string, ConversationSummary> _conversationSummaries = new();
@@ -24,13 +27,14 @@ public class ConversationSummaryService : IConversationSummaryService
         IPromptService promptService,
         ILogger<ConversationSummaryService> logger,
         IRequestResponseLogger requestResponseLogger,
-        IToolExecutor toolExecutor)
+        IToolExecutor toolExecutor, ConsoleUIService consoleUIService)
     {
         _llmProvider = llmProvider;
         _promptService = promptService;
         _logger = logger;
         _requestResponseLogger = requestResponseLogger;
         _toolExecutor = toolExecutor;
+        _consoleUIService = consoleUIService;
     }
 
     public async Task<TurnSummary> SummarizeTurnAsync(
@@ -46,7 +50,7 @@ public class ConversationSummaryService : IConversationSummaryService
         try
         {
             _logger.LogInformation("Summarizing turn {Turn}", turnNumber);
-
+            _consoleUIService.DisplayProcess("진행 내용을 요약 중입니다...");
             // Load the conversation summary prompt template
             var promptTemplate = await _promptService.GetPromptAsync("conversation-summary");
 

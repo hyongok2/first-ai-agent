@@ -4,6 +4,7 @@ using McpAgent.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Diagnostics;
+using McpAgent.Presentation.Console;
 
 namespace McpAgent.Application.Services;
 
@@ -17,19 +18,22 @@ public class InputRefinementService : IInputRefinementService
     private readonly IPromptService _promptService;
     private readonly IRequestResponseLogger _requestResponseLogger;
     private readonly IToolExecutor _toolExecutor;
+    private readonly ConsoleUIService _consoleUIService;
 
     public InputRefinementService(
         ILogger<InputRefinementService> logger,
         ILlmProvider llmProvider,
         IPromptService promptService,
         IRequestResponseLogger requestResponseLogger,
-        IToolExecutor toolExecutor)
+        IToolExecutor toolExecutor,
+        ConsoleUIService consoleUIService)
     {
         _logger = logger;
         _llmProvider = llmProvider;
         _promptService = promptService;
         _requestResponseLogger = requestResponseLogger;
         _toolExecutor = toolExecutor;
+        _consoleUIService = consoleUIService;
     }
 
     public async Task<RefinedInput> RefineInputAsync(
@@ -41,7 +45,7 @@ public class InputRefinementService : IInputRefinementService
         try
         {
             _logger.LogInformation("Refining input using LLM with input-refinement prompt: {Input}", originalInput);
-
+            _consoleUIService.DisplayProcess("사용자의 의도를 파악 중입니다...");
             // input-refinement.txt 프롬프트 로드
             var promptTemplate = await _promptService.GetPromptAsync("input-refinement", cancellationToken);
 
@@ -68,8 +72,8 @@ public class InputRefinementService : IInputRefinementService
             stopwatch.Stop();
 
             // LLM 요청/응답 로깅
-             _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
-                 _llmProvider.GetLlmModel(), "InputRefinement", prompt, response, stopwatch.ElapsedMilliseconds, cancellationToken));
+            _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
+                _llmProvider.GetLlmModel(), "InputRefinement", prompt, response, stopwatch.ElapsedMilliseconds, cancellationToken));
 
             _logger.LogDebug("Input refinement LLM response: {Response}", response);
 
