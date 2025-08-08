@@ -188,8 +188,23 @@ public class ProperMcpClientAdapter : IMcpClientAdapter, IDisposable
 
         _healthCheckTimer?.Dispose();
 
-        var shutdownTasks = _connections.Values.Select(connection => connection.DisposeAsync().AsTask());
-        await Task.WhenAll(shutdownTasks);
+        // Ctrl+C 상황에서 빠른 종료를 위해 타임아웃 적용
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(2));
+
+        try
+        {
+            var shutdownTasks = _connections.Values.Select(connection => connection.DisposeAsync().AsTask());
+            await Task.WhenAll(shutdownTasks).WaitAsync(cts.Token);
+        }
+        catch (OperationCanceledException) when (cts.Token.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning("MCP server shutdown timed out - servers will be forcefully terminated by ProcessJobManager");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during MCP server shutdown - servers will be forcefully terminated by ProcessJobManager");
+        }
 
         _connections.Clear();
         _initialized = false;
@@ -398,11 +413,12 @@ public class ProperMcpClientAdapter : IMcpClientAdapter, IDisposable
             {
                 try
                 {
-                    connection.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(5));
+                    // Ctrl+C 상황에서 빠른 종료를 위해 타임아웃을 1초로 단축
+                    connection.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(1));
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error disposing connection to server {ServerName}", connection.ServerName);
+                    _logger.LogError(ex, "Error disposing connection to server {ServerName} - will be forcefully terminated by ProcessJobManager", connection.ServerName);
                 }
             }
 

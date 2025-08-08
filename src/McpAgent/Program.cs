@@ -97,10 +97,30 @@ try
         .UseConsoleLifetime();
 
     var host = builder.Build();
-    await host.RunAsync();
+    
+    try
+    {
+        await host.RunAsync();
+    }
+    finally
+    {
+        // 프로그램 종료 시 ProcessJobManager를 정리하여 모든 자식 프로세스가 확실히 종료되도록 함
+        ProcessJobManager.Instance?.Dispose();
+    }
 }
 catch (Exception ex)
 {
     Console.WriteLine($"Application failed to start: {ex.Message}");
+    
+    // 예외 발생 시에도 ProcessJobManager 정리
+    try
+    {
+        ProcessJobManager.Instance?.Dispose();
+    }
+    catch (Exception disposeEx)
+    {
+        Console.WriteLine($"Error disposing ProcessJobManager: {disposeEx.Message}");
+    }
+    
     Environment.Exit(1);
 }

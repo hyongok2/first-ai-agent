@@ -404,7 +404,8 @@ public class McpServerConnection : IAsyncDisposable
         {
             if (_responseReaderTask != null)
             {
-                await _responseReaderTask;
+                // 짧은 타임아웃으로 reader task 대기
+                await _responseReaderTask.WaitAsync(TimeSpan.FromMilliseconds(500));
             }
         }
         catch (Exception ex)
@@ -414,6 +415,28 @@ public class McpServerConnection : IAsyncDisposable
 
         try
         {
+            // 프로세스를 graceful하게 종료 시도
+            if (_process != null && !_process.HasExited)
+            {
+                _logger.LogDebug("Attempting graceful shutdown of MCP server {ServerName} process", _serverName);
+                
+                // 먼저 stdin을 닫아서 graceful shutdown을 시도
+                try
+                {
+                    _process.StandardInput?.Close();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to close stdin for server {ServerName}", _serverName);
+                }
+                
+                // 짧게 대기해서 자연스럽게 종료되는지 확인
+                if (!_process.WaitForExit(500))
+                {
+                    _logger.LogDebug("MCP server {ServerName} did not exit gracefully, will be terminated by ProcessJobManager", _serverName);
+                }
+            }
+            
             _process?.Dispose();
         }
         catch (Exception ex)
@@ -430,5 +453,7 @@ public class McpServerConnection : IAsyncDisposable
             kvp.Value.TrySetCanceled();
         }
         _pendingRequests.Clear();
+        
+        _logger.LogDebug("MCP server connection {ServerName} disposed successfully", _serverName);
     }
 }
