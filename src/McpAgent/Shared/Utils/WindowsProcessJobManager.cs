@@ -6,43 +6,21 @@ using System.Runtime.InteropServices;
 namespace McpAgent.Shared.Utils;
 
 /// <summary>
-/// Windows Job Object 유틸. 부모 종료 시 자식 프로세스 자동 종료.
-/// - Initialize()로 Job 생성 및 KILL_ON_JOB_CLOSE 설정
-/// - Assign(process)로 자식 프로세스 Job에 등록
-/// - Dispose() 시 자식 전부 종료됨
+/// Windows Job Object를 사용한 프로세스 관리 구현.
+/// 부모 종료 시 자식 프로세스를 자동으로 종료시킵니다.
 /// </summary>
-public sealed class ProcessJobManager : IDisposable
+internal sealed class WindowsProcessJobManager : IProcessJobManager
 {
-    private static readonly object _lock = new();
-    private static ProcessJobManager? _instance;
-
-    public static ProcessJobManager Instance
-    {
-        get
-        {
-            if (_instance is null)
-                throw new InvalidOperationException("ProcessJobManager is not initialized. Call Initialize() first.");
-            return _instance;
-        }
-    }
-
-    public static void Initialize()
-    {
-        if (!OperatingSystem.IsWindows())
-            throw new PlatformNotSupportedException("ProcessJobManager supports only Windows.");
-
-        lock (_lock)
-        {
-            if (_instance != null) return;
-            _instance = new ProcessJobManager();
-        }
-    }
-
     private IntPtr _job;
     private bool _disposed;
 
-    private ProcessJobManager()
+    public bool IsSupported => OperatingSystem.IsWindows();
+
+    public WindowsProcessJobManager()
     {
+        if (!IsSupported)
+            throw new PlatformNotSupportedException("Windows Job Objects are only supported on Windows.");
+
         _job = CreateJobObject(IntPtr.Zero, null);
         if (_job == IntPtr.Zero)
             ThrowLastError("CreateJobObject failed");
@@ -54,15 +32,11 @@ public sealed class ProcessJobManager : IDisposable
             ThrowLastError("SetInformationJobObject failed");
     }
 
-    /// <summary>
-    /// 실행된 프로세스를 Job에 추가.
-    /// </summary>
     public void Assign(Process process)
     {
         if (process is null) throw new ArgumentNullException(nameof(process));
-        if (_disposed) throw new ObjectDisposedException(nameof(ProcessJobManager));
+        if (_disposed) throw new ObjectDisposedException(nameof(WindowsProcessJobManager));
 
-        // 프로세스는 이미 Start() 된 상태여야 함
         if (process.HasExited)
             throw new InvalidOperationException("Process already exited.");
 
@@ -83,7 +57,6 @@ public sealed class ProcessJobManager : IDisposable
 
         if (_job != IntPtr.Zero)
         {
-            // 이 순간 Job 핸들이 닫히며, KILL_ON_JOB_CLOSE 플래그로 모든 자식이 종료됩니다.
             CloseHandle(_job);
             _job = IntPtr.Zero;
         }

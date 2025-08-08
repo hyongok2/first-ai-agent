@@ -19,6 +19,7 @@ public class ProperMcpClientAdapter : IMcpClientAdapter, IDisposable
     private readonly ILogger<ProperMcpClientAdapter> _logger;
     private readonly McpConfiguration _config;
     private readonly IRequestResponseLogger _requestResponseLogger;
+    private readonly IProcessJobManager _processJobManager;
     private readonly Dictionary<string, McpServerConnection> _connections = new();
     private Timer? _healthCheckTimer;
     private bool _initialized = false;
@@ -31,11 +32,13 @@ public class ProperMcpClientAdapter : IMcpClientAdapter, IDisposable
     public ProperMcpClientAdapter(
         ILogger<ProperMcpClientAdapter> logger,
         IOptions<AgentConfiguration> options,
-        IRequestResponseLogger requestResponseLogger)
+        IRequestResponseLogger requestResponseLogger,
+        IProcessJobManager processJobManager)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _config = options?.Value?.Mcp ?? throw new ArgumentNullException(nameof(options));
         _requestResponseLogger = requestResponseLogger ?? throw new ArgumentNullException(nameof(requestResponseLogger));
+        _processJobManager = processJobManager ?? throw new ArgumentNullException(nameof(processJobManager));
 
         // Don't start timer here - wait until after initialization
     }
@@ -264,7 +267,7 @@ public class ProperMcpClientAdapter : IMcpClientAdapter, IDisposable
                 throw new InvalidOperationException($"Failed to start process for server {serverConfig.Name}");
             }
 
-            ProcessJobManager.Instance.Assign(process);
+            _processJobManager.Assign(process);
 
             _logger.LogDebug("Process started with PID {ProcessId} for server {ServerName}",
                 process.Id, serverConfig.Name);

@@ -1,5 +1,0 @@
-Tool '{ToolName}' (step {StepNumber}) returned: {ToolResult}
-
-Continue your analysis. You can:
-1. Use another tool if you need more information
-2. Provide a final comprehensive response based on all the information gathered

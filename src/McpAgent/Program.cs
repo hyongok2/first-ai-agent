@@ -21,8 +21,6 @@ using Microsoft.Extensions.Logging;
 
 try
 {
-    ProcessJobManager.Initialize();
-    
     var builder = Host.CreateDefaultBuilder(args)
         .ConfigureAppConfiguration((context, config) =>
         {
@@ -84,6 +82,9 @@ try
             // 호환성을 위해 기존 인터페이스도 유지 (사용되지 않음)
             services.AddSingleton<IConversationRepository, InMemoryConversationRepository>();
 
+            // Process Management
+            services.AddSingleton<IProcessJobManager>(ProcessJobManagerFactory.Create());
+
             // MCP Client Adapter (using proper MCP protocol implementation)
             services.AddSingleton<IMcpClientAdapter, ProperMcpClientAdapter>();
 
@@ -98,29 +99,10 @@ try
 
     var host = builder.Build();
     
-    try
-    {
-        await host.RunAsync();
-    }
-    finally
-    {
-        // 프로그램 종료 시 ProcessJobManager를 정리하여 모든 자식 프로세스가 확실히 종료되도록 함
-        ProcessJobManager.Instance?.Dispose();
-    }
+    await host.RunAsync();
 }
 catch (Exception ex)
 {
     Console.WriteLine($"Application failed to start: {ex.Message}");
-    
-    // 예외 발생 시에도 ProcessJobManager 정리
-    try
-    {
-        ProcessJobManager.Instance?.Dispose();
-    }
-    catch (Exception disposeEx)
-    {
-        Console.WriteLine($"Error disposing ProcessJobManager: {disposeEx.Message}");
-    }
-    
     Environment.Exit(1);
 }

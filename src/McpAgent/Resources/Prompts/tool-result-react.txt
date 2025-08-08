@@ -1,9 +1,0 @@
-**Observation:** {ToolResult}
-
-**Thought:** Now I have the results from the {ToolName} tool. Let me analyze what I learned:
-- What information did this tool provide?
-- Does this fully answer the user's question?
-- Is there additional information I need to gather?
-- Should I use another tool or can I provide a complete answer?
-
-[Continue with your reasoning and either use another tool or provide your Final Answer]
