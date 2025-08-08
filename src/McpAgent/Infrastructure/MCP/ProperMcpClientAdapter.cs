@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Diagnostics;
 using System.Text;
+using McpAgent.Shared.Utils;
 
 namespace McpAgent.Infrastructure.MCP;
 
@@ -247,6 +248,8 @@ public class ProperMcpClientAdapter : IMcpClientAdapter, IDisposable
             {
                 throw new InvalidOperationException($"Failed to start process for server {serverConfig.Name}");
             }
+
+            ProcessJobManager.Instance.Assign(process);
 
             _logger.LogDebug("Process started with PID {ProcessId} for server {ServerName}",
                 process.Id, serverConfig.Name);

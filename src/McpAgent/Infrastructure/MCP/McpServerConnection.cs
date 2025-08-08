@@ -414,11 +414,6 @@ public class McpServerConnection : IAsyncDisposable
 
         try
         {
-            if (_process != null && !_process.HasExited)
-            {
-                _process.Kill();
-                await _process.WaitForExitAsync();
-            }
             _process?.Dispose();
         }
         catch (Exception ex)
@@ -429,7 +424,7 @@ public class McpServerConnection : IAsyncDisposable
         _requestSemaphore?.Dispose();
         _readerCancellation?.Dispose();
 
-        // Complete any pending requests with cancellation
+        //Complete any pending requests with cancellation
         foreach (var kvp in _pendingRequests)
         {
             kvp.Value.TrySetCanceled();

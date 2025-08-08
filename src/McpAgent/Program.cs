@@ -13,6 +13,7 @@ using McpAgent.Infrastructure.Services;
 using McpAgent.Infrastructure.Storage;
 using McpAgent.Presentation.Console;
 using McpAgent.Presentation.Hosting;
+using McpAgent.Shared.Utils;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -20,6 +21,8 @@ using Microsoft.Extensions.Logging;
 
 try
 {
+    ProcessJobManager.Initialize();
+    
     var builder = Host.CreateDefaultBuilder(args)
         .ConfigureAppConfiguration((context, config) =>
         {
