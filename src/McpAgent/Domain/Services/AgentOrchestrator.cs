@@ -75,9 +75,12 @@ public class AgentOrchestrator
             // 턴 번호 계산 (기존 방식)
             var turnNumber = conversation.GetMessages().Count(m => m.Role == MessageRole.User);
             
-            // 초기 입력 정제 (처음에 한 번만 수행)
+            // 초기 입력 정제 (처음에 한 번만 수행) - 사용자 원본 의도 보존
             RefinedInput? initialRefinedInput = null;
             SystemCapability? finalSelectedCapability = null;
+            
+            // 누적 계획 관리: 각 사이클마다 새로운 계획이 추가됨
+            var cumulativePlans = new List<string>();
 
             while (cycleCount < maxCycles)
             {
@@ -87,27 +90,67 @@ public class AgentOrchestrator
                 // 각 사이클마다 최신 대화 이력 가져오기 (도구 실행 결과가 추가될 수 있으므로)
                 var conversationHistory = conversation.GetMessages();
 
-                // Step 1: Input Refinement
-                _logger.LogInformation("Cycle {CycleCount} - Step 1: Input refinement", cycleCount);
-                var refinedInput = await _inputRefinementService.RefineInputAsync(
-                    currentInput, 
-                    conversationHistory, 
-                    systemContext, 
-                    cancellationToken);
-                    
-                // 최초 사이클에서만 초기 정제 입력 저장
+                RefinedInput refinedInput;
+                
                 if (cycleCount == 1)
                 {
+                    // 첫 번째 사이클: 사용자 원본 요청을 정제
+                    _logger.LogInformation("Cycle {CycleCount} - Step 1: Initial input refinement", cycleCount);
+                    refinedInput = await _inputRefinementService.RefineInputAsync(
+                        currentInput, 
+                        conversationHistory, 
+                        systemContext, 
+                        cancellationToken);
                     initialRefinedInput = refinedInput;
+                    
+                    // 첫 번째 계획을 누적 계획에 추가
+                    if (!string.IsNullOrEmpty(refinedInput.SuggestedPlan))
+                    {
+                        cumulativePlans.Add($"[사이클 {cycleCount}] {refinedInput.SuggestedPlan}");
+                        _logger.LogInformation("Initial plan added: {Plan}", refinedInput.SuggestedPlan);
+                    }
+                }
+                else
+                {
+                    // 후속 사이클: 원본 의도를 유지하면서 현재 상황 반영하고 누적 계획 포함
+                    _logger.LogInformation("Cycle {CycleCount} - Step 1: Context-aware refinement with cumulative plans", cycleCount);
+                    
+                    // 누적 계획 정보 구성
+                    var allPlansInfo = cumulativePlans.Count > 0 
+                        ? $"\n\n[누적된 제안 계획들]\n{string.Join("\n", cumulativePlans)}" 
+                        : "";
+                    
+                    // 원본 사용자 의도와 현재 도구 실행 결과, 누적 계획을 결합한 컨텍스트 생성
+                    var enhancedContext = $"{systemContext}\n\n[원본 사용자 요청]\n의도: {initialRefinedInput?.ClarifiedIntent ?? "확인 필요"}\n요청: {initialRefinedInput?.RefinedQuery ?? currentInput}{allPlansInfo}\n\n[현재 상황]\n{currentInput}";
+                    
+                    refinedInput = await _inputRefinementService.RefineInputAsync(
+                        currentInput, 
+                        conversationHistory, 
+                        enhancedContext, 
+                        cancellationToken);
+                    
+                    // 새로운 계획이 제안되었으면 누적 계획에 추가
+                    if (!string.IsNullOrEmpty(refinedInput.SuggestedPlan))
+                    {
+                        cumulativePlans.Add($"[사이클 {cycleCount}] {refinedInput.SuggestedPlan}");
+                        _logger.LogInformation("Additional plan added for cycle {Cycle}: {Plan}", cycleCount, refinedInput.SuggestedPlan);
+                    }
                 }
 
                 // Step 2: Capability Selection
                 _logger.LogInformation("Cycle {CycleCount} - Step 2: Capability selection", cycleCount);
+                
+                // 누적 계획 정보가 포함된 시스템 컨텍스트 생성
+                var cumulativePlansInfo = cumulativePlans.Count > 0 
+                    ? $"\n\n[진행 계획 상태]\n{string.Join("\n", cumulativePlans)}" 
+                    : "";
+                var enhancedSystemContext = $"{systemContext}{cumulativePlansInfo}";
+                
                 var availableCapabilities = await _capabilitySelectionService.GetAvailableCapabilitiesAsync();
                 var selectedCapability = await _capabilitySelectionService.SelectCapabilityAsync(
                     refinedInput, 
                     conversationHistory, 
-                    systemContext, 
+                    enhancedSystemContext, 
                     availableCapabilities, 
                     allToolExecutionResults, 
                     cancellationToken);
@@ -139,6 +182,7 @@ public class AgentOrchestrator
                         refinedInput, 
                         conversationHistory, 
                         systemContext, 
+                        cumulativePlans,
                         cycleCount, 
                         cancellationToken);
                     
@@ -146,8 +190,11 @@ public class AgentOrchestrator
                     {
                         allToolExecutionResults.Add(toolExecution);
                         
-                        // 도구 실행 결과를 다음 사이클의 입력으로 사용
-                        currentInput = $"이전 작업 결과: {toolExecution.Result}. 추가 작업이 필요한지 판단하고 다음 단계를 진행해주세요.";
+                        // 도구 실행 결과를 다음 사이클의 입력으로 사용하되, 원본 의도와 계획을 명시적으로 포함
+                        var planContext = !string.IsNullOrEmpty(initialRefinedInput?.SuggestedPlan) 
+                            ? $"\n원본 제안 계획: {initialRefinedInput.SuggestedPlan}" 
+                            : "";
+                        currentInput = $"[원본 사용자 요청 목표: {initialRefinedInput?.ClarifiedIntent ?? "사용자 요청 처리"}]{planContext}\n\n이전 도구 '{toolExecution.ToolName}' 실행 결과: {toolExecution.Result}\n\n원본 사용자 요청과 제안된 계획에 따라 추가 작업이 필요한지 판단하고 다음 단계를 진행해주세요.";
                         
                         // 도구 실행 결과를 대화 이력에 추가 (기존 방식)
                         var toolMessage = new ConversationMessage(MessageRole.Assistant, 
@@ -159,8 +206,11 @@ public class AgentOrchestrator
                     }
                     else
                     {
-                        // 도구 실행 실패시에도 다음 사이클로 진행하여 다른 방법을 시도
-                        currentInput = "이전 도구 실행이 실패했습니다. 다른 방법을 시도하거나 작업을 완료해주세요.";
+                        // 도구 실행 실패시에도 다음 사이클로 진행하여 다른 방법을 시도하되, 원본 의도와 계획 유지
+                        var planContext = !string.IsNullOrEmpty(initialRefinedInput?.SuggestedPlan) 
+                            ? $"\n원본 제안 계획: {initialRefinedInput.SuggestedPlan}" 
+                            : "";
+                        currentInput = $"[원본 사용자 요청 목표: {initialRefinedInput?.ClarifiedIntent ?? "사용자 요청 처리"}]{planContext}\n\n이전 도구 실행이 실패했습니다. 원본 사용자 요청과 제안된 계획에 따라 다른 방법을 시도하거나 작업을 완료해주세요.";
                         continue;
                     }
                 }
@@ -242,6 +292,7 @@ public class AgentOrchestrator
         RefinedInput refinedInput,
         IReadOnlyList<ConversationMessage> conversationHistory,
         string systemContext,
+        List<string> cumulativePlans,
         int cycleCount,
         CancellationToken cancellationToken)
     {
@@ -257,13 +308,18 @@ public class AgentOrchestrator
         
         if (selectedTool != null)
         {
-            // Generate parameters using ParameterGenerationService
+            // Generate parameters using ParameterGenerationService (with cumulative plans)
+            var cumulativePlansInfo = cumulativePlans.Count > 0 
+                ? $"\n\n[진행 계획 상태]\n{string.Join("\n", cumulativePlans)}" 
+                : "";
+            var enhancedSystemContext = $"{systemContext}{cumulativePlansInfo}";
+            
             var parameters = await _parameterGenerationService.GenerateParametersAsync(
                 selectedTool.Name,
                 selectedTool,
                 refinedInput,
                 conversationHistory,
-                systemContext,
+                enhancedSystemContext,
                 cancellationToken);
             
             _logger.LogInformation("Cycle {CycleCount} - Generated parameters for tool {ToolName}: {@Parameters}", 

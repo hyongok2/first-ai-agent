@@ -65,6 +65,8 @@ public class CapabilitySelectionService : ICapabilitySelectionService
                 .Replace("{CONVERSATION_HISTORY}", conversationHistoryText)
                 .Replace("{CLARIFIED_INTENT}", refinedInput.ClarifiedIntent)
                 .Replace("{REFINED_QUERY}", refinedInput.RefinedQuery)
+                .Replace("{SUGGESTED_PLAN}", refinedInput.SuggestedPlan ?? "특별한 계획이 제안되지 않았습니다.")
+                .Replace("{CUMULATIVE_PLANS}", ExtractCumulativePlansFromContext(systemContext))
                 .Replace("{CONFIDENCE_LEVEL}", refinedInput.IntentConfidence.ToString())
                 .Replace("{TOOL_EXECUTION_RESULTS}", toolResultsText);
 
@@ -306,6 +308,19 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
             .ToList();
 
         return string.Join('\n', results);
+    }
+
+    private static string ExtractCumulativePlansFromContext(string systemContext)
+    {
+        // systemContext에서 [진행 계획 상태] 섹션 추출
+        var startMarker = "[진행 계획 상태]";
+        var startIndex = systemContext.IndexOf(startMarker);
+        
+        if (startIndex == -1)
+            return "아직 제안된 계획이 없습니다.";
+        
+        var plansSection = systemContext.Substring(startIndex + startMarker.Length).Trim();
+        return string.IsNullOrEmpty(plansSection) ? "아직 제안된 계획이 없습니다." : plansSection;
     }
 
     private async Task<string> GetAvailableMcpToolsDescriptionAsync(CancellationToken cancellationToken)
