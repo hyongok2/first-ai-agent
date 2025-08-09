@@ -68,20 +68,13 @@ public class ProperMcpClientAdapter : IMcpClientAdapter, IDisposable
             }
         }
 
-        // Start health check timer only after successful initialization
-        // if (_connections.Count > 0)
-        // {
-        //     var healthCheckInterval = TimeSpan.FromSeconds(_config.HealthCheckIntervalSeconds);
-        //     _healthCheckTimer = new Timer(PerformHealthCheck, null, healthCheckInterval, healthCheckInterval);
-        //     _logger.LogInformation("Health check timer started with {Interval}s interval", _config.HealthCheckIntervalSeconds);
-        // }
-
         _initialized = true;
         _logger.LogInformation("MCP client initialization completed with {ConnectedCount}/{TotalCount} servers",
             _connections.Count, _config.Servers.Count);
 
         // 초기화 완료 후 도구 목록을 미리 캐시에 로드
         if (_connections.Count == 0) return;
+
         try
         {
             _logger.LogInformation("Pre-loading tool list during MCP initialization...");
@@ -156,14 +149,13 @@ public class ProperMcpClientAdapter : IMcpClientAdapter, IDisposable
             try
             {
                 var tools = await connection.GetToolsAsync(cancellationToken);
-                if (tools.Any(t => t.Name == toolName))
-                {
-                    _logger.LogInformation("Calling tool {ToolName} on server {ServerName}", toolName, connection.ServerName);
-                    var result = await connection.CallToolAsync(toolName, arguments, cancellationToken);
+                if (tools.Any(t => t.Name == toolName) == false) continue;
 
-                    _logger.LogInformation("Tool {ToolName} executed successfully on server {ServerName}", toolName, connection.ServerName);
-                    return result;
-                }
+                _logger.LogInformation("Calling tool {ToolName} on server {ServerName}", toolName, connection.ServerName);
+                var result = await connection.CallToolAsync(toolName, arguments, cancellationToken);
+
+                _logger.LogInformation("Tool {ToolName} executed successfully on server {ServerName}", toolName, connection.ServerName);
+                return result;
             }
             catch (Exception ex)
             {
@@ -301,10 +293,8 @@ public class ProperMcpClientAdapter : IMcpClientAdapter, IDisposable
             while (!process.HasExited)
             {
                 var error = await process.StandardError.ReadLineAsync();
-                if (!string.IsNullOrEmpty(error))
-                {
-                    _logger.LogWarning("MCP server {ServerName} stderr: {Error}", serverName, error);
-                }
+                if (string.IsNullOrEmpty(error)) continue;
+                _logger.LogWarning("MCP server {ServerName} stderr: {Error}", serverName, error);
             }
         }
         catch (Exception ex)
@@ -321,22 +311,7 @@ public class ProperMcpClientAdapter : IMcpClientAdapter, IDisposable
         {
             try
             {
-                var parameters = new Dictionary<string, ParameterDefinition>();
-
-                if (mcpTool.InputSchema?.Properties != null)
-                {
-                    foreach (var prop in mcpTool.InputSchema.Properties)
-                    {
-                        var isRequired = mcpTool.InputSchema.Required?.Contains(prop.Key) ?? false;
-
-                        parameters[prop.Key] = new ParameterDefinition
-                        {
-                            Type = prop.Value.Type,
-                            Description = prop.Value.Description ?? "",
-                            Required = isRequired
-                        };
-                    }
-                }
+                var parameters = ExtractParameterDefinitions(mcpTool);
 
                 var domainTool = new ToolDefinition
                 {
@@ -356,77 +331,46 @@ public class ProperMcpClientAdapter : IMcpClientAdapter, IDisposable
         return domainTools;
     }
 
-    private async void PerformHealthCheck(object? state)
+    private static Dictionary<string, ParameterDefinition> ExtractParameterDefinitions(McpTool mcpTool)
     {
-        var deadConnections = new List<string>();
+        var parameters = new Dictionary<string, ParameterDefinition>();
 
-        foreach (var kvp in _connections.ToList())
+        if (mcpTool.InputSchema?.Properties == null) return parameters;
+
+        foreach (var prop in mcpTool.InputSchema.Properties)
         {
-            try
+            var isRequired = mcpTool.InputSchema.Required?.Contains(prop.Key) ?? false;
+
+            parameters[prop.Key] = new ParameterDefinition
             {
-                if (!await kvp.Value.IsHealthyAsync())
-                {
-                    _logger.LogWarning("MCP server {ServerName} is unhealthy, marking for reconnection", kvp.Key);
-                    deadConnections.Add(kvp.Key);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Health check failed for MCP server {ServerName}", kvp.Key);
-                deadConnections.Add(kvp.Key);
-            }
+                Type = prop.Value.Type,
+                Description = prop.Value.Description ?? "",
+                Required = isRequired
+            };
         }
 
-        // Attempt to reconnect dead connections
-        foreach (var serverName in deadConnections)
-        {
-            try
-            {
-                if (_connections.TryGetValue(serverName, out var deadConnection))
-                {
-                    await deadConnection.DisposeAsync();
-                    _connections.Remove(serverName);
-                }
-
-                var serverConfig = _config.Servers.FirstOrDefault(s => s.Name == serverName);
-                if (serverConfig != null)
-                {
-                    _logger.LogInformation("Attempting to reconnect to MCP server {ServerName}", serverName);
-                    await ConnectToServerAsync(serverConfig);
-                    _logger.LogInformation("Successfully reconnected to MCP server {ServerName}", serverName);
-
-                    // 재연결 시 도구 캐시 무효화
-                    InvalidateCache();
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to reconnect to MCP server {ServerName}", serverName);
-            }
-        }
+        return parameters;
     }
 
     public void Dispose()
     {
-        if (!_disposed)
+        if (_disposed) return;
+        _healthCheckTimer?.Dispose();
+
+        foreach (var connection in _connections.Values)
         {
-            _healthCheckTimer?.Dispose();
-
-            foreach (var connection in _connections.Values)
+            try
             {
-                try
-                {
-                    // Ctrl+C 상황에서 빠른 종료를 위해 타임아웃을 1초로 단축
-                    connection.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(1));
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error disposing connection to server {ServerName} - will be forcefully terminated by ProcessJobManager", connection.ServerName);
-                }
+                // Ctrl+C 상황에서 빠른 종료를 위해 타임아웃을 1초로 단축
+                connection.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(1));
             }
-
-            _connections.Clear();
-            _disposed = true;
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error disposing connection to server {ServerName} - will be forcefully terminated by ProcessJobManager", connection.ServerName);
+            }
         }
+
+        _connections.Clear();
+        _disposed = true;
     }
 }

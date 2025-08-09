@@ -137,7 +137,8 @@ public class McpServerConnection : IAsyncDisposable
 
         var requestJson = JsonSerializer.Serialize(request, new JsonSerializerOptions
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = true  // 로그 가독성을 위해 들여쓰기 추가
         });
 
         try
@@ -147,7 +148,8 @@ public class McpServerConnection : IAsyncDisposable
             var response = await SendRequestAsync<CallToolResult>(request, cancellationToken);
             var responseJson = JsonSerializer.Serialize(response, new JsonSerializerOptions
             {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                WriteIndented = true  // 로그 가독성을 위해 들여쓰기 추가
             });
             stopwatch.Stop();
 

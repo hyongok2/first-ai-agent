@@ -25,15 +25,14 @@ public class FileLoggerProvider : ILoggerProvider
 
     public void Dispose()
     {
-        if (!_disposed)
+        if (_disposed) return;
+
+        foreach (var logger in _loggers.Values)
         {
-            foreach (var logger in _loggers.Values)
-            {
-                logger.Dispose();
-            }
-            _loggers.Clear();
-            _disposed = true;
+            logger.Dispose();
         }
+        _loggers.Clear();
+        _disposed = true;
     }
 }
 
@@ -60,18 +59,13 @@ public class FileLogger : ILogger, IDisposable
 
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
     {
-        if (!IsEnabled(logLevel) || _disposed)
-            return;
+        if (!IsEnabled(logLevel) || _disposed) return;
 
         var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
         var logLevelString = GetLogLevelString(logLevel);
         var message = formatter(state, exception);
 
-        if (exception != null)
-        {
-            message += $" | Exception: {exception.Message}";
-        }
-
+        if (exception != null) message += $" | Exception: {exception.Message}";
         var logLine = $"{timestamp} [{logLevelString}] {_categoryName}: {message}";
 
         lock (_lock)
@@ -104,9 +98,7 @@ public class FileLogger : ILogger, IDisposable
 
     public void Dispose()
     {
-        if (!_disposed)
-        {
-            _disposed = true;
-        }
+        if (_disposed) return;
+        _disposed = true;
     }
 }

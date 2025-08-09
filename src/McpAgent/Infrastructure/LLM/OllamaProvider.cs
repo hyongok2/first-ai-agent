@@ -17,7 +17,6 @@ public class OllamaProvider : ILlmProvider
     private readonly ILogger<OllamaProvider> _logger;
     private readonly LlmConfiguration _config;
     private readonly Kernel _kernel;
-
     private readonly string _llmModel;
 
     public OllamaProvider(ILogger<OllamaProvider> logger, IOptions<LlmConfiguration> options)
@@ -52,46 +51,6 @@ public class OllamaProvider : ILlmProvider
         }
     }
 
-    public async IAsyncEnumerable<string> GenerateStreamingResponseAsync(string prompt, CancellationToken cancellationToken = default)
-    {
-        // For now, provide a simple non-streaming implementation
-        // In a real implementation, this would use streaming capabilities
-        var result = await GenerateResponseAsync(prompt, cancellationToken);
-
-        // Split the result into chunks to simulate streaming
-        const int chunkSize = 50;
-        for (int i = 0; i < result.Length; i += chunkSize)
-        {
-            if (cancellationToken.IsCancellationRequested)
-                yield break;
-
-            var chunk = result.Substring(i, Math.Min(chunkSize, result.Length - i));
-            yield return chunk;
-
-            // Small delay to simulate streaming
-            await Task.Delay(10, cancellationToken);
-        }
-    }
-
-    /// <summary>
-    /// LLM이 사용 가능한지 확인합니다.
-    /// </summary>
-    /// <param name="cancellationToken">취소 토큰</param>
-    /// <returns>사용 가능 여부</returns>
-    public async Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var response = await _kernel.InvokePromptAsync("Hello", cancellationToken: cancellationToken);
-            return !string.IsNullOrEmpty(response.GetValue<string>());
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Ollama availability check failed");
-            return false;
-        }
-    }
-    
     public string GetLlmModel()
     {
         return _llmModel;

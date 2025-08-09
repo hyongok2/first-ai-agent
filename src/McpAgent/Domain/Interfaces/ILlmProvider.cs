@@ -16,14 +16,6 @@ public interface ILlmProvider
     Task<string> GenerateResponseAsync(string prompt, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 스트리밍 응답을 생성합니다.
-    /// </summary>
-    /// <param name="prompt">프롬프트</param>
-    /// <param name="cancellationToken">취소 토큰</param>
-    /// <returns>스트리밍 응답</returns>
-    IAsyncEnumerable<string> GenerateStreamingResponseAsync(string prompt, CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// LLM Model 정보를 가져옵니다.
     /// </summary>
     /// <returns></returns>
