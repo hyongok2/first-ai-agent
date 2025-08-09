@@ -3,33 +3,21 @@ using McpAgent.Domain.Entities;
 using McpAgent.Domain.Interfaces;
 using McpAgent.Application.Interfaces;
 using Microsoft.Extensions.Logging;
-using System.Diagnostics;
 using McpAgent.Presentation.Console;
 
 namespace McpAgent.Application.Services;
 
-public class ParameterGenerationService : IParameterGenerationService
+public class ParameterGenerationService : BaseLlmService<ParameterGenerationService>, IParameterGenerationService
 {
-    private readonly ILlmProvider _llmProvider;
-    private readonly IPromptService _promptService;
-    private readonly ILogger<ParameterGenerationService> _logger;
-    private readonly IRequestResponseLogger _requestResponseLogger;
-    private readonly IToolExecutor _toolExecutor;
-    private readonly ConsoleUIService _consoleUIService;
-
     public ParameterGenerationService(
+        ILogger<ParameterGenerationService> logger,
         ILlmProvider llmProvider,
         IPromptService promptService,
-        ILogger<ParameterGenerationService> logger,
         IRequestResponseLogger requestResponseLogger,
-        IToolExecutor toolExecutor, ConsoleUIService consoleUIService)
+        IToolExecutor toolExecutor,
+        ConsoleUIService consoleUIService)
+        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor, consoleUIService)
     {
-        _llmProvider = llmProvider;
-        _promptService = promptService;
-        _logger = logger;
-        _requestResponseLogger = requestResponseLogger;
-        _toolExecutor = toolExecutor;
-        _consoleUIService = consoleUIService;
     }
 
     public async Task<Dictionary<string, object>> GenerateParametersAsync(
@@ -42,52 +30,40 @@ public class ParameterGenerationService : IParameterGenerationService
     {
         try
         {
-            _logger.LogInformation("Generating parameters for tool: {Tool}", toolName);
-            _consoleUIService.DisplayProcess("도구를 호출하기 위하여 파라미터를 생성 중입니다...");
-            // Load the parameter generation prompt template
-            var promptTemplate = await _promptService.GetPromptAsync("parameter-generation");
+            Logger.LogInformation("Generating parameters for tool: {Tool}", toolName);
+            ConsoleUIService.DisplayProcess("도구를 호출하기 위하여 파라미터를 생성 중입니다...");
+            
+            // 프롬프트 변수 준비
+            var replacements = new Dictionary<string, string>
+            {
+                {"{SYSTEM_CONTEXT}", systemContext},
+                {"{CURRENT_TIME}", GetCurrentTimeInfo()},
+                {"{TOOL_NAME}", toolName},
+                {"{TOOL_DESCRIPTION}", toolDefinition.Description},
+                {"{TOOL_PARAMETERS}", FormatToolParameters(toolDefinition.Parameters)},
+                {"{AVAILABLE_MCP_TOOLS}", await GetAvailableMcpToolsDescriptionAsync(cancellationToken)},
+                {"{CONVERSATION_HISTORY}", FormatConversationHistory(conversationHistory)},
+                {"{CLARIFIED_INTENT}", refinedInput.ClarifiedIntent},
+                {"{REFINED_QUERY}", refinedInput.RefinedQuery},
+                {"{SUGGESTED_PLAN}", refinedInput.SuggestedPlan ?? "특별한 계획이 제안되지 않았습니다."},
+                {"{CUMULATIVE_PLANS}", ExtractCumulativePlansFromContext(systemContext)},
+                {"{EXTRACTED_ENTITIES}", FormatExtractedEntities(refinedInput.ExtractedEntities)}
+            };
 
-            // Format conversation history
-            var conversationHistoryText = FormatConversationHistory(conversationHistory);
-            var availableMcpToolsText = await GetAvailableMcpToolsDescriptionAsync(cancellationToken);
-            var currentTimeText = GetCurrentTimeInfo();
-
-            // Replace placeholders in the template
-            var prompt = promptTemplate
-                .Replace("{SYSTEM_CONTEXT}", systemContext)
-                .Replace("{CURRENT_TIME}", currentTimeText)
-                .Replace("{TOOL_NAME}", toolName)
-                .Replace("{TOOL_DESCRIPTION}", toolDefinition.Description)
-                .Replace("{TOOL_PARAMETERS}", FormatToolParameters(toolDefinition.Parameters))
-                .Replace("{AVAILABLE_MCP_TOOLS}", availableMcpToolsText)
-                .Replace("{CONVERSATION_HISTORY}", conversationHistoryText)
-                .Replace("{CLARIFIED_INTENT}", refinedInput.ClarifiedIntent)
-                .Replace("{REFINED_QUERY}", refinedInput.RefinedQuery)
-                .Replace("{SUGGESTED_PLAN}", refinedInput.SuggestedPlan ?? "특별한 계획이 제안되지 않았습니다.")
-                .Replace("{CUMULATIVE_PLANS}", ExtractCumulativePlansFromContext(systemContext))
-                .Replace("{EXTRACTED_ENTITIES}", FormatExtractedEntities(refinedInput.ExtractedEntities));
-
-            Stopwatch stopwatch = Stopwatch.StartNew();
-
-            // Call LLM to generate parameters
-            var response = await _llmProvider.GenerateResponseAsync(prompt, cancellationToken);
-
-            stopwatch.Stop();
-
-            // LLM 요청/응답 로깅
-            _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
-               _llmProvider.GetLlmModel(), "ParameterGeneration", prompt, response, stopwatch.ElapsedMilliseconds, cancellationToken));
+            // 프롬프트 준비 및 LLM 호출
+            var prompt = await PreparePromptAsync("parameter-generation", replacements, cancellationToken);
+            var response = await CallLlmAsync(prompt, "ParameterGeneration", cancellationToken);
 
             // Parse the JSON response and extract parameters only
             var parameterResult = ParseParameterResult(response, toolName);
 
-            _logger.LogInformation("Parameters generated successfully for tool: {Tool}", toolName);
+            Logger.LogInformation("Parameters generated successfully for tool: {Tool}", toolName);
 
             return parameterResult.Parameters;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to generate parameters for tool: {Tool}", toolName);
+            Logger.LogError(ex, "Failed to generate parameters for tool: {Tool}", toolName);
 
             // Return fallback parameter result
             var fallback = CreateFallbackParameterResult(toolName, refinedInput);
@@ -137,7 +113,7 @@ public class ParameterGenerationService : IParameterGenerationService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to generate parameters for tool: {Tool}", toolDef.Name);
+                Logger.LogError(ex, "Failed to generate parameters for tool: {Tool}", toolDef.Name);
 
                 // Add fallback result for this tool
                 results.Add(CreateFallbackParameterResult(toolDef.Name, refinedInput));
@@ -171,7 +147,7 @@ public class ParameterGenerationService : IParameterGenerationService
         }
         catch (JsonException ex)
         {
-            _logger.LogError(ex, "Failed to parse parameter result JSON: {Response}", response);
+            Logger.LogError(ex, "Failed to parse parameter result JSON: {Response}", response);
             throw new InvalidOperationException("Failed to parse LLM response as JSON", ex);
         }
     }
@@ -192,23 +168,6 @@ public class ParameterGenerationService : IParameterGenerationService
         return parameters;
     }
 
-    private object ConvertJsonElementToObject(JsonElement element)
-    {
-        return element.ValueKind switch
-        {
-            JsonValueKind.String => element.GetString() ?? "",
-            JsonValueKind.Number => element.TryGetInt32(out var intValue) ? intValue : element.GetDouble(),
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            JsonValueKind.Array => element.EnumerateArray()
-                .Select(ConvertJsonElementToObject)
-                .ToArray(),
-            JsonValueKind.Object => element.EnumerateObject()
-                .ToDictionary(p => p.Name, p => ConvertJsonElementToObject(p.Value)),
-            JsonValueKind.Null => null!,
-            _ => element.GetRawText()
-        };
-    }
 
     private bool ValidateParameters(JsonElement root)
     {
@@ -232,18 +191,6 @@ public class ParameterGenerationService : IParameterGenerationService
         return false;
     }
 
-    private static string ExtractCumulativePlansFromContext(string systemContext)
-    {
-        // systemContext에서 [진행 계획 상태] 섹션 추출
-        var startMarker = "[진행 계획 상태]";
-        var startIndex = systemContext.IndexOf(startMarker);
-        
-        if (startIndex == -1)
-            return "아직 제안된 계획이 없습니다.";
-        
-        var plansSection = systemContext.Substring(startIndex + startMarker.Length).Trim();
-        return string.IsNullOrEmpty(plansSection) ? "아직 제안된 계획이 없습니다." : plansSection;
-    }
 
     private string FormatExtractedEntities(List<string> entities)
     {
@@ -256,38 +203,10 @@ public class ParameterGenerationService : IParameterGenerationService
         return string.Join('\n', formatted);
     }
 
-    private string ExtractJsonFromResponse(string response)
-    {
-        // Remove markdown code blocks if present
-        var lines = response.Split('\n');
-        var jsonStartIndex = -1;
-        var jsonEndIndex = -1;
-
-        for (int i = 0; i < lines.Length; i++)
-        {
-            if (lines[i].Trim().StartsWith("```json"))
-            {
-                jsonStartIndex = i + 1;
-            }
-            else if (lines[i].Trim() == "```" && jsonStartIndex != -1)
-            {
-                jsonEndIndex = i;
-                break;
-            }
-        }
-
-        if (jsonStartIndex != -1 && jsonEndIndex != -1)
-        {
-            return string.Join('\n', lines[jsonStartIndex..jsonEndIndex]);
-        }
-
-        // If no markdown blocks found, assume entire response is JSON
-        return response.Trim();
-    }
 
     private ToolParameterResult CreateFallbackParameterResult(string toolName, RefinedInput refinedInput)
     {
-        _logger.LogWarning("Creating fallback parameter result for tool: {Tool}", toolName);
+        Logger.LogWarning("Creating fallback parameter result for tool: {Tool}", toolName);
 
         // Create simple parameters based on refined input
         var fallbackParameters = new Dictionary<string, object>();
@@ -353,19 +272,19 @@ public class ParameterGenerationService : IParameterGenerationService
     {
         try
         {
-            _logger.LogInformation("Recommending tool from {Count} available tools", availableTools.Count);
+            Logger.LogInformation("Recommending tool from {Count} available tools", availableTools.Count);
 
             // Simple heuristic-based recommendation for now
             // In a more sophisticated implementation, this would use LLM
             var toolName = RecommendToolHeuristic(availableTools, refinedInput);
 
-            _logger.LogInformation("Recommended tool: {Tool}", toolName);
+            Logger.LogInformation("Recommended tool: {Tool}", toolName);
 
             return toolName;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to recommend tool");
+            Logger.LogError(ex, "Failed to recommend tool");
 
             // Return first available tool as fallback
             return availableTools.FirstOrDefault()?.Name ?? "echo";
@@ -400,19 +319,6 @@ public class ParameterGenerationService : IParameterGenerationService
                availableTools.FirstOrDefault()?.Name ?? "echo";
     }
 
-    private string FormatConversationHistory(IReadOnlyList<ConversationMessage> conversationHistory)
-    {
-        if (conversationHistory == null || conversationHistory.Count == 0)
-        {
-            return "대화 이력이 없습니다.";
-        }
-
-        var history = conversationHistory
-            .Select(msg => $"{msg.Role}: {msg.Content}")
-            .ToList();
-
-        return string.Join('\n', history);
-    }
 
     private string FormatToolParameters(Dictionary<string, ParameterDefinition> parameters)
     {
@@ -428,51 +334,5 @@ public class ParameterGenerationService : IParameterGenerationService
         return string.Join('\n', paramDefs);
     }
 
-    private string GetCurrentTimeInfo()
-    {
-        var now = DateTime.Now;
-        var utcNow = DateTime.UtcNow;
 
-        return $@"현재 시간: {now:yyyy-MM-dd HH:mm:ss} (현지 시간)
-UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
-요일: {now.DayOfWeek switch
-        {
-            DayOfWeek.Monday => "월요일",
-            DayOfWeek.Tuesday => "화요일",
-            DayOfWeek.Wednesday => "수요일",
-            DayOfWeek.Thursday => "목요일",
-            DayOfWeek.Friday => "금요일",
-            DayOfWeek.Saturday => "토요일",
-            DayOfWeek.Sunday => "일요일",
-            _ => now.DayOfWeek.ToString()
-        }}
-타임존: {TimeZoneInfo.Local.DisplayName}";
-    }
-
-    private async Task<string> GetAvailableMcpToolsDescriptionAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var availableTools = await _toolExecutor.GetAvailableToolsAsync(cancellationToken);
-
-            if (availableTools == null || availableTools.Count == 0)
-            {
-                return "현재 사용 가능한 MCP 도구가 없습니다.";
-            }
-
-            var toolDescriptions = availableTools
-                .Select(tool => $"- **{tool.Name}**: {tool.Description}")
-                .ToList();
-
-            var header = $"=== 사용 가능한 MCP 도구 ({availableTools.Count}개) ===";
-            var toolList = string.Join('\n', toolDescriptions);
-
-            return $"{header}\n{toolList}";
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to get available MCP tools information");
-            return "MCP 도구 정보를 가져올 수 없습니다.";
-        }
-    }
 }

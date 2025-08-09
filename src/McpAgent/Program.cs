@@ -50,7 +50,6 @@ try
                 
                 // 파일 로깅만 사용 (콘솔 로깅 제거)
                 builder.AddProvider(new FileLoggerProvider());
-                
                 builder.SetMinimumLevel(LogLevel.Information);
             });
 

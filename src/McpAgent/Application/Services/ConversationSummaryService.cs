@@ -3,38 +3,25 @@ using McpAgent.Domain.Entities;
 using McpAgent.Domain.Interfaces;
 using McpAgent.Application.Interfaces;
 using Microsoft.Extensions.Logging;
-using System.Diagnostics;
 using McpAgent.Presentation.Console;
 
 namespace McpAgent.Application.Services;
 
-public class ConversationSummaryService : IConversationSummaryService
+public class ConversationSummaryService : BaseLlmService<ConversationSummaryService>, IConversationSummaryService
 {
-    private readonly ILlmProvider _llmProvider;
-    private readonly IPromptService _promptService;
-    private readonly ILogger<ConversationSummaryService> _logger;
-    private readonly IRequestResponseLogger _requestResponseLogger;
-    private readonly IToolExecutor _toolExecutor;
-
-    private readonly ConsoleUIService _consoleUIService;
-
     // In-memory storage for conversation summaries
     // In a production environment, this should be replaced with persistent storage
     private readonly Dictionary<string, ConversationSummary> _conversationSummaries = new();
 
     public ConversationSummaryService(
+        ILogger<ConversationSummaryService> logger,
         ILlmProvider llmProvider,
         IPromptService promptService,
-        ILogger<ConversationSummaryService> logger,
         IRequestResponseLogger requestResponseLogger,
-        IToolExecutor toolExecutor, ConsoleUIService consoleUIService)
+        IToolExecutor toolExecutor,
+        ConsoleUIService consoleUIService)
+        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor, consoleUIService)
     {
-        _llmProvider = llmProvider;
-        _promptService = promptService;
-        _logger = logger;
-        _requestResponseLogger = requestResponseLogger;
-        _toolExecutor = toolExecutor;
-        _consoleUIService = consoleUIService;
     }
 
     public async Task<TurnSummary> SummarizeTurnAsync(
@@ -49,40 +36,30 @@ public class ConversationSummaryService : IConversationSummaryService
     {
         try
         {
-            _logger.LogInformation("Summarizing turn {Turn}", turnNumber);
-            _consoleUIService.DisplayProcess("진행 내용을 요약 중입니다...");
+            Logger.LogInformation("Summarizing turn {Turn}", turnNumber);
+            ConsoleUIService.DisplayProcess("진행 내용을 요약 중입니다...");
             
             // 대화 ID 결정 (systemContext에서 추출하거나 기본값 사용)
             var conversationId = ExtractConversationId(systemContext) ?? "default";
             
-            // Load the conversation summary prompt template
-            var promptTemplate = await _promptService.GetPromptAsync("conversation-summary");
+            // 프롬프트 변수 준비
+            var replacements = new Dictionary<string, string>
+            {
+                {"{SYSTEM_CONTEXT}", systemContext},
+                {"{CURRENT_TIME}", GetCurrentTimeInfo()},
+                {"{TURN_NUMBER}", turnNumber.ToString()},
+                {"{ORIGINAL_INPUT}", originalInput},
+                {"{REFINED_INPUT}", refinedInput.RefinedQuery},
+                {"{SELECTED_CAPABILITY}", selectedCapability.Type.ToString()},
+                {"{TOOL_EXECUTIONS}", FormatToolExecutions(toolExecutions)},
+                {"{FINAL_RESPONSE}", finalResponse}
+            };
 
-            // Format complex objects
-            var toolExecutionsText = FormatToolExecutions(toolExecutions);
-            var currentTimeText = GetCurrentTimeInfo();
+            // 프롬프트 준비 및 LLM 호출
+            var prompt = await PreparePromptAsync("conversation-summary", replacements, cancellationToken);
 
-            // Replace placeholders in the template
-            var prompt = promptTemplate
-                .Replace("{SYSTEM_CONTEXT}", systemContext)
-                .Replace("{CURRENT_TIME}", currentTimeText)
-                .Replace("{TURN_NUMBER}", turnNumber.ToString())
-                .Replace("{ORIGINAL_INPUT}", originalInput)
-                .Replace("{REFINED_INPUT}", refinedInput.RefinedQuery)
-                .Replace("{SELECTED_CAPABILITY}", selectedCapability.Type.ToString())
-                .Replace("{TOOL_EXECUTIONS}", toolExecutionsText)
-                .Replace("{FINAL_RESPONSE}", finalResponse);
-
-            Stopwatch stopwatch = Stopwatch.StartNew();
-
-            // Call LLM to summarize the turn
-            var response = await _llmProvider.GenerateResponseAsync(prompt, cancellationToken);
-
-            stopwatch.Stop();
-
-            // LLM 요청/응답 로깅
-            _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
-                _llmProvider.GetLlmModel(), "ConversationSummary", prompt, response, stopwatch.Elapsed.TotalMilliseconds, cancellationToken));
+            // Call LLM to summarize the turn using base class method
+            var response = await CallLlmAsync(prompt, "ConversationSummary", cancellationToken);
 
             // Parse the JSON response
             var turnSummary = ParseTurnSummary(response, turnNumber);
@@ -101,14 +78,14 @@ public class ConversationSummaryService : IConversationSummaryService
             // 대화 요약 업데이트 (자동 저장)
             await UpdateConversationSummaryAsync(conversationId, turnSummary, systemContext, cancellationToken);
 
-            _logger.LogInformation("Turn {Turn} summarized and saved successfully for conversation {ConversationId}", 
+            Logger.LogInformation("Turn {Turn} summarized and saved successfully for conversation {ConversationId}", 
                 turnNumber, conversationId);
 
             return turnSummary;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to summarize turn {Turn}",
+            Logger.LogError(ex, "Failed to summarize turn {Turn}",
                 turnNumber);
 
             // Return fallback turn summary
@@ -181,26 +158,6 @@ public class ConversationSummaryService : IConversationSummaryService
         return string.Join('\n', executions);
     }
 
-    private string GetCurrentTimeInfo()
-    {
-        var now = DateTime.Now;
-        var utcNow = DateTime.UtcNow;
-
-        return $@"현재 시간: {now:yyyy-MM-dd HH:mm:ss} (현지 시간)
-UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
-요일: {now.DayOfWeek switch
-        {
-            DayOfWeek.Monday => "월요일",
-            DayOfWeek.Tuesday => "화요일",
-            DayOfWeek.Wednesday => "수요일",
-            DayOfWeek.Thursday => "목요일",
-            DayOfWeek.Friday => "금요일",
-            DayOfWeek.Saturday => "토요일",
-            DayOfWeek.Sunday => "일요일",
-            _ => now.DayOfWeek.ToString()
-        }}
-타임존: {TimeZoneInfo.Local.DisplayName}";
-    }
 
     private async Task UpdateConversationSummaryAsync(
         string conversationId,
@@ -227,11 +184,11 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
 
                 conversationSummary.SetConsolidatedSummary(consolidatedSummary);
 
-                _logger.LogInformation("Consolidated summary created for conversation {ConversationId}", conversationId);
+                Logger.LogInformation("Consolidated summary created for conversation {ConversationId}", conversationId);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to consolidate summaries for conversation {ConversationId}", conversationId);
+                Logger.LogError(ex, "Failed to consolidate summaries for conversation {ConversationId}", conversationId);
             }
         }
 
@@ -243,26 +200,17 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
         string systemContext,
         CancellationToken cancellationToken = default)
     {
-        // Load the consolidation summary prompt template
-        var promptTemplate = await _promptService.GetPromptAsync("consolidation-summary");
+        // 프롬프트 변수 준비
+        var replacements = new Dictionary<string, string>
+        {
+            {"{SYSTEM_CONTEXT}", systemContext},
+            {"{CURRENT_TIME}", GetCurrentTimeInfo()},
+            {"{INDIVIDUAL_TURN_SUMMARIES}", string.Join('\n', individualTurns.Select(t => $"턴 {t.TurnNumber}: {t.OverallSummary}"))}
+        };
 
-        // Prepare individual turn summaries text
-        var turnSummariesText = string.Join('\n',
-            individualTurns.Select(t => $"턴 {t.TurnNumber}: {t.OverallSummary}"));
-        var currentTimeText = GetCurrentTimeInfo();
-
-        // Replace placeholders in the template
-        var prompt = promptTemplate
-            .Replace("{SYSTEM_CONTEXT}", systemContext)
-            .Replace("{CURRENT_TIME}", currentTimeText)
-            .Replace("{INDIVIDUAL_TURN_SUMMARIES}", turnSummariesText);
-        Stopwatch stopwatch = Stopwatch.StartNew();
-        // Call LLM to consolidate summaries
-        var response = await _llmProvider.GenerateResponseAsync(prompt, cancellationToken);
-        stopwatch.Stop();
-        // LLM 요청/응답 로깅
-        _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
-            _llmProvider.GetLlmModel(), "ConsolidationSummary", prompt, response,stopwatch.ElapsedMilliseconds, cancellationToken));
+        // 프롬프트 준비 및 LLM 호출
+        var prompt = await PreparePromptAsync("consolidation-summary", replacements, cancellationToken);
+        var response = await CallLlmAsync(prompt, "ConsolidationSummary", cancellationToken);
 
         // Parse the JSON response and extract consolidated summary
         var consolidationResult = ParseConsolidationResult(response);
@@ -441,7 +389,7 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
         }
         catch (JsonException ex)
         {
-            _logger.LogError(ex, "Failed to parse turn summary JSON: {Response}", response);
+            Logger.LogError(ex, "Failed to parse turn summary JSON: {Response}", response);
             throw new InvalidOperationException("Failed to parse LLM response as JSON", ex);
         }
     }
@@ -461,7 +409,7 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
         }
         catch (JsonException ex)
         {
-            _logger.LogError(ex, "Failed to parse consolidation result JSON: {Response}", response);
+            Logger.LogError(ex, "Failed to parse consolidation result JSON: {Response}", response);
             return "통합 요약 생성에 실패했습니다.";
         }
     }
@@ -486,38 +434,10 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
         return result;
     }
 
-    private string ExtractJsonFromResponse(string response)
-    {
-        // Remove markdown code blocks if present
-        var lines = response.Split('\n');
-        var jsonStartIndex = -1;
-        var jsonEndIndex = -1;
-
-        for (int i = 0; i < lines.Length; i++)
-        {
-            if (lines[i].Trim().StartsWith("```json"))
-            {
-                jsonStartIndex = i + 1;
-            }
-            else if (lines[i].Trim() == "```" && jsonStartIndex != -1)
-            {
-                jsonEndIndex = i;
-                break;
-            }
-        }
-
-        if (jsonStartIndex != -1 && jsonEndIndex != -1)
-        {
-            return string.Join('\n', lines[jsonStartIndex..jsonEndIndex]);
-        }
-
-        // If no markdown blocks found, assume entire response is JSON
-        return response.Trim();
-    }
 
     private TurnSummary CreateFallbackTurnSummary(int turnNumber, string originalInput, string finalResponse)
     {
-        _logger.LogWarning("Creating fallback turn summary for turn {Turn}", turnNumber);
+        Logger.LogWarning("Creating fallback turn summary for turn {Turn}", turnNumber);
 
         return new TurnSummary(
             turnNumber,
@@ -556,12 +476,12 @@ UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
                 systemContext,
                 cancellationToken);
             
-            _logger.LogInformation("Conversation turn saved for {ConversationId}, turn {Turn}", 
+            Logger.LogInformation("Conversation turn saved for {ConversationId}, turn {Turn}", 
                 conversationId, turnNumber);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to save conversation turn for {ConversationId}", conversationId);
+            Logger.LogError(ex, "Failed to save conversation turn for {ConversationId}", conversationId);
         }
     }
     

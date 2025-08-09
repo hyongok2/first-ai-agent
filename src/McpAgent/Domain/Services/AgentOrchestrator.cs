@@ -24,7 +24,7 @@ public class AgentOrchestrator
         IParameterGenerationService parameterGenerationService,
         IResponseGenerationService responseGenerationService,
         IConversationRepository conversationRepository,
-        IToolExecutor toolExecutor) // 나중에 사용할 예비용
+        IToolExecutor toolExecutor)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _inputRefinementService = inputRefinementService ?? throw new ArgumentNullException(nameof(inputRefinementService));
@@ -133,12 +133,12 @@ public class AgentOrchestrator
                     : "";
                 var enhancedSystemContext = $"{systemContext}{cumulativePlansInfo}";
                 
-                var availableCapabilities = await _capabilitySelectionService.GetAvailableCapabilitiesAsync();
+                // Get available capabilities
+
                 var selectedCapability = await _capabilitySelectionService.SelectCapabilityAsync(
                     refinedInput, 
                     conversationHistory, 
                     enhancedSystemContext, 
-                    availableCapabilities, 
                     allToolExecutionResults, 
                     cancellationToken);
                     

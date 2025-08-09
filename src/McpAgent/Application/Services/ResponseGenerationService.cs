@@ -1,34 +1,23 @@
+using System.Diagnostics;
 using McpAgent.Domain.Entities;
 using McpAgent.Domain.Interfaces;
 using McpAgent.Application.Interfaces;
 using Microsoft.Extensions.Logging;
-using System.Diagnostics;
 using McpAgent.Presentation.Console;
 
 namespace McpAgent.Application.Services;
 
-public class ResponseGenerationService : IResponseGenerationService
+public class ResponseGenerationService : BaseLlmService<ResponseGenerationService>, IResponseGenerationService
 {
-    private readonly ILlmProvider _llmProvider;
-    private readonly IPromptService _promptService;
-    private readonly ILogger<ResponseGenerationService> _logger;
-    private readonly IRequestResponseLogger _requestResponseLogger;
-    private readonly IToolExecutor _toolExecutor;
-    private readonly ConsoleUIService _consoleUIService;
-
     public ResponseGenerationService(
+        ILogger<ResponseGenerationService> logger,
         ILlmProvider llmProvider,
         IPromptService promptService,
-        ILogger<ResponseGenerationService> logger,
         IRequestResponseLogger requestResponseLogger,
-        IToolExecutor toolExecutor, ConsoleUIService consoleUIService)
+        IToolExecutor toolExecutor,
+        ConsoleUIService consoleUIService)
+        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor, consoleUIService)
     {
-        _llmProvider = llmProvider;
-        _promptService = promptService;
-        _logger = logger;
-        _requestResponseLogger = requestResponseLogger;
-        _toolExecutor = toolExecutor;
-        _consoleUIService = consoleUIService;
     }
 
     public async Task<string> GenerateResponseAsync(
@@ -41,9 +30,9 @@ public class ResponseGenerationService : IResponseGenerationService
     {
         try
         {
-            _logger.LogInformation("Generating response using response-generation prompt for capability: {Capability}",
+            Logger.LogInformation("Generating response using response-generation prompt for capability: {Capability}",
                 selectedCapability.Type);
-            _consoleUIService.DisplayProcess("사용자 응답을 생성 중입니다...");
+            ConsoleUIService.DisplayProcess("사용자 응답을 생성 중입니다...");
             // response-generation.txt 프롬프트 사용
             return await GenerateResponseUsingTemplate(
                 refinedInput,
@@ -55,7 +44,7 @@ public class ResponseGenerationService : IResponseGenerationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to generate response for capability: {Capability}",
+            Logger.LogError(ex, "Failed to generate response for capability: {Capability}",
                 selectedCapability.Type);
 
             // Return fallback response
@@ -72,7 +61,7 @@ public class ResponseGenerationService : IResponseGenerationService
         CancellationToken cancellationToken)
     {
         // response-generation.txt 프롬프트 로드
-        var promptTemplate = await _promptService.GetPromptAsync("response-generation", cancellationToken);
+        var promptTemplate = await PromptService.GetPromptAsync("response-generation", cancellationToken);
 
         // 대화 이력 포맷팅
         var historyText = FormatConversationHistory(conversationHistory);
@@ -95,40 +84,11 @@ public class ResponseGenerationService : IResponseGenerationService
             .Replace("{CAPABILITY_REASONING}", selectedCapability.Reasoning)
             .Replace("{TOOL_EXECUTION_RESULTS}", toolResultsText);
 
-        Stopwatch stopwatch = Stopwatch.StartNew();
+        var response = await CallLlmAsync(prompt, "ResponseGeneration", cancellationToken);
 
-        // LLM 호출 (response-generation 단계)
-        var response = await _llmProvider.GenerateResponseAsync(prompt, cancellationToken);
-
-        stopwatch.Stop();
-        // LLM 요청/응답 로깅
-        _ = Task.Run(() => _requestResponseLogger.LogLlmRequestResponseAsync(
-            _llmProvider.GetLlmModel(), "ResponseGeneration", prompt, response, stopwatch.ElapsedMilliseconds, cancellationToken));
-
-        _logger.LogDebug("Response generation LLM response: {Response}", response);
+        Logger.LogDebug("Response generation LLM response: {Response}", response);
 
         return response;
-    }
-
-    private string FormatConversationHistory(IReadOnlyList<ConversationMessage> history)
-    {
-        if (history == null || history.Count == 0)
-            return "이전 대화 없음";
-
-        var historyText = string.Join("\n", history.Select(m => $"{m.Role}: {m.Content}"));
-        return historyText;
-    }
-
-    private string FormatToolExecutionResults(IReadOnlyList<ToolExecution>? toolExecutionResults)
-    {
-        if (toolExecutionResults == null || toolExecutionResults.Count == 0)
-            return "도구 실행 결과 없음";
-
-        var results = toolExecutionResults
-            .Select(result => $"도구: {result.ToolName}\n결과: {result.Result}\n상태: {result.IsSuccess}")
-            .ToList();
-
-        return string.Join("\n\n", results);
     }
 
     private string CreateFallbackResponse(RefinedInput refinedInput, SystemCapability selectedCapability)
@@ -157,51 +117,5 @@ public class ResponseGenerationService : IResponseGenerationService
         };
     }
 
-    private string GetCurrentTimeInfo()
-    {
-        var now = DateTime.Now;
-        var utcNow = DateTime.UtcNow;
 
-        return $@"현재 시간: {now:yyyy-MM-dd HH:mm:ss} (현지 시간)
-UTC 시간: {utcNow:yyyy-MM-dd HH:mm:ss}
-요일: {now.DayOfWeek switch
-        {
-            DayOfWeek.Monday => "월요일",
-            DayOfWeek.Tuesday => "화요일",
-            DayOfWeek.Wednesday => "수요일",
-            DayOfWeek.Thursday => "목요일",
-            DayOfWeek.Friday => "금요일",
-            DayOfWeek.Saturday => "토요일",
-            DayOfWeek.Sunday => "일요일",
-            _ => now.DayOfWeek.ToString()
-        }}
-타임존: {TimeZoneInfo.Local.DisplayName}";
-    }
-
-    private async Task<string> GetAvailableMcpToolsDescriptionAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var availableTools = await _toolExecutor.GetAvailableToolsAsync(cancellationToken);
-
-            if (availableTools == null || availableTools.Count == 0)
-            {
-                return "현재 사용 가능한 MCP 도구가 없습니다.";
-            }
-
-            var toolDescriptions = availableTools
-                .Select(tool => $"- **{tool.Name}**: {tool.Description}")
-                .ToList();
-
-            var header = $"=== 사용 가능한 MCP 도구 ({availableTools.Count}개) ===";
-            var toolList = string.Join('\n', toolDescriptions);
-
-            return $"{header}\n{toolList}";
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to get available MCP tools information");
-            return "MCP 도구 정보를 가져올 수 없습니다.";
-        }
-    }
 }
