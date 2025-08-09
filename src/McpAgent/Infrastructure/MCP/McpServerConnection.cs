@@ -32,7 +32,7 @@ public class McpServerConnection : IAsyncDisposable
         _process = process;
         _logger = logger;
         _requestResponseLogger = requestResponseLogger;
-        
+
         // Start background task to read responses
         _responseReaderTask = Task.Run(ReadResponsesAsync, _readerCancellation.Token);
     }
@@ -64,10 +64,10 @@ public class McpServerConnection : IAsyncDisposable
             };
 
             var response = await SendRequestAsync<InitializeResult>(initRequest, cancellationToken);
-            
+
             if (response?.ServerInfo != null)
             {
-                _logger.LogInformation("Successfully initialized connection to {ServerName} (version: {Version})", 
+                _logger.LogInformation("Successfully initialized connection to {ServerName} (version: {Version})",
                     _serverName, response.ServerInfo.Version);
             }
 
@@ -77,9 +77,9 @@ public class McpServerConnection : IAsyncDisposable
                 Method = "notifications/initialized",
                 Params = new { }
             };
-            
+
             await SendNotificationAsync(initializedNotification, cancellationToken);
-            
+
             _initialized = true;
         }
         catch (Exception ex)
@@ -144,7 +144,7 @@ public class McpServerConnection : IAsyncDisposable
         try
         {
             Stopwatch stopwatch = Stopwatch.StartNew();
-            
+
             var response = await SendRequestAsync<CallToolResult>(request, cancellationToken);
             var responseJson = JsonSerializer.Serialize(response, new JsonSerializerOptions
             {
@@ -164,7 +164,7 @@ public class McpServerConnection : IAsyncDisposable
                     stopwatch.ElapsedMilliseconds,
                     CancellationToken.None));
             }
-            
+
             if (response?.IsError == true)
             {
                 var errorText = response.Content?.FirstOrDefault()?.Text ?? "Unknown error";
@@ -195,11 +195,11 @@ public class McpServerConnection : IAsyncDisposable
             if (_requestResponseLogger != null)
             {
                 _ = Task.Run(() => _requestResponseLogger.LogMcpRequestResponseAsync(
-                    _serverName, 
-                    toolName, 
-                    requestJson, 
+                    _serverName,
+                    toolName,
+                    requestJson,
                     $"Error: {ex.Message}",
-                    0, 
+                    0,
                     CancellationToken.None));
             }
 
@@ -208,45 +208,15 @@ public class McpServerConnection : IAsyncDisposable
         }
     }
 
-    public async Task<bool> IsHealthyAsync()
-    {
-        try
-        {
-            if (_process?.HasExited != false)
-            {
-                return false;
-            }
-
-            return true; // 헬스체크를 이런 식으로 하면 안됨.
-            // Test with actual MCP protocol - try to list tools
-            var toolsRequest = new McpRequest
-            {
-                Id = GetNextRequestId(),
-                Method = "tools/list",
-                Params = new { }
-            };
-
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            var response = await SendRequestAsync<object>(toolsRequest, cts.Token);
-            
-            // Consider healthy if we get any response, even if no tools available
-            return response != null;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private async Task<T?> SendRequestAsync<T>(McpRequest request, CancellationToken cancellationToken = default) where T : class
     {
         await _requestSemaphore.WaitAsync(cancellationToken);
-        
+
         try
         {
             var requestId = request.Id;
             var tcs = new TaskCompletionSource<string>();
-            
+
             _pendingRequests[requestId] = tcs;
 
             var requestJson = JsonSerializer.Serialize(request, new JsonSerializerOptions
@@ -262,7 +232,7 @@ public class McpServerConnection : IAsyncDisposable
             linkedCts.CancelAfter(TimeSpan.FromSeconds(30)); // 30 second timeout
 
             var responseJson = await tcs.Task.WaitAsync(linkedCts.Token);
-            
+
             _logger.LogDebug("Received MCP response from {ServerName}: {Response}", _serverName, responseJson);
 
             var response = JsonSerializer.Deserialize<McpResponse<T>>(responseJson, new JsonSerializerOptions
@@ -342,8 +312,7 @@ public class McpServerConnection : IAsyncDisposable
 
     private void ProcessResponse(string responseJson)
     {
-        if (string.IsNullOrWhiteSpace(responseJson))
-            return;
+        if (string.IsNullOrWhiteSpace(responseJson)) return;
 
         _logger.LogDebug("Processing response from {ServerName}: {Response}", _serverName, responseJson);
 
@@ -421,7 +390,7 @@ public class McpServerConnection : IAsyncDisposable
             if (_process != null && !_process.HasExited)
             {
                 _logger.LogDebug("Attempting graceful shutdown of MCP server {ServerName} process", _serverName);
-                
+
                 // 먼저 stdin을 닫아서 graceful shutdown을 시도
                 try
                 {
@@ -431,14 +400,14 @@ public class McpServerConnection : IAsyncDisposable
                 {
                     _logger.LogDebug(ex, "Failed to close stdin for server {ServerName}", _serverName);
                 }
-                
+
                 // 짧게 대기해서 자연스럽게 종료되는지 확인
                 if (!_process.WaitForExit(500))
                 {
                     _logger.LogDebug("MCP server {ServerName} did not exit gracefully, will be terminated by ProcessJobManager", _serverName);
                 }
             }
-            
+
             _process?.Dispose();
         }
         catch (Exception ex)
@@ -455,7 +424,7 @@ public class McpServerConnection : IAsyncDisposable
             kvp.Value.TrySetCanceled();
         }
         _pendingRequests.Clear();
-        
+
         _logger.LogDebug("MCP server connection {ServerName} disposed successfully", _serverName);
     }
 }
