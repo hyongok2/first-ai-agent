@@ -14,9 +14,8 @@ public class ParameterGenerationService : BaseLlmService<ParameterGenerationServ
         ILlmProvider llmProvider,
         IPromptService promptService,
         IRequestResponseLogger requestResponseLogger,
-        IToolExecutor toolExecutor,
-        ConsoleUIService consoleUIService)
-        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor, consoleUIService)
+        IToolExecutor toolExecutor)
+        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor)
     {
     }
 
@@ -31,7 +30,6 @@ public class ParameterGenerationService : BaseLlmService<ParameterGenerationServ
         try
         {
             Logger.LogInformation("Generating parameters for tool: {Tool}", toolName);
-            ConsoleUIService.DisplayProcess("도구를 호출하기 위하여 파라미터를 생성 중입니다...");
             
             // 프롬프트 변수 준비
             var replacements = new Dictionary<string, string>

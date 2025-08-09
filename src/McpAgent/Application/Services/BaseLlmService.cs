@@ -18,22 +18,19 @@ public abstract class BaseLlmService<TService>
     protected readonly IPromptService PromptService;
     protected readonly IRequestResponseLogger RequestResponseLogger;
     protected readonly IToolExecutor ToolExecutor;
-    protected readonly ConsoleUIService ConsoleUIService;
 
     protected BaseLlmService(
         ILogger<TService> logger,
         ILlmProvider llmProvider,
         IPromptService promptService,
         IRequestResponseLogger requestResponseLogger,
-        IToolExecutor toolExecutor,
-        ConsoleUIService consoleUIService)
+        IToolExecutor toolExecutor)
     {
         Logger = logger ?? throw new ArgumentNullException(nameof(logger));
         LlmProvider = llmProvider ?? throw new ArgumentNullException(nameof(llmProvider));
         PromptService = promptService ?? throw new ArgumentNullException(nameof(promptService));
         RequestResponseLogger = requestResponseLogger ?? throw new ArgumentNullException(nameof(requestResponseLogger));
         ToolExecutor = toolExecutor ?? throw new ArgumentNullException(nameof(toolExecutor));
-        ConsoleUIService = consoleUIService ?? throw new ArgumentNullException(nameof(consoleUIService));
     }
 
     /// <summary>

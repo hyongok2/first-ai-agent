@@ -14,15 +14,15 @@ public class AgentService : IAgentService
     private readonly IMcpClientAdapter _mcpClient;
     private readonly ILlmProvider _llmProvider;
 
-    private readonly ConsoleUIService _consoleUI;
+    private readonly IDisplayResult _displayResult;
 
-    public AgentService(ILogger<AgentService> logger, AgentOrchestrator orchestrator, IMcpClientAdapter mcpClient, ILlmProvider llmProvider, ConsoleUIService consoleUI)
+    public AgentService(ILogger<AgentService> logger, AgentOrchestrator orchestrator, IMcpClientAdapter mcpClient, ILlmProvider llmProvider, IDisplayResult displayResult)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
         _mcpClient = mcpClient ?? throw new ArgumentNullException(nameof(mcpClient));
         _llmProvider = llmProvider ?? throw new ArgumentNullException(nameof(llmProvider));
-        _consoleUI = consoleUI ?? throw new ArgumentNullException(nameof(consoleUI));
+        _displayResult = displayResult ?? throw new ArgumentNullException(nameof(displayResult));
     }
 
     public async Task<AgentResponse> ProcessRequestAsync(AgentRequest request, CancellationToken cancellationToken = default)
@@ -63,22 +63,22 @@ public class AgentService : IAgentService
         if (!mcpHealthy && !llmHealthy)
         {
             _logger.LogWarning("Both MCP and LLM services failed initialization. Running in severely degraded mode.");
-            _consoleUI.DisplayError("MCP서버 및 LLM 서비스 초기화에 실패하였습니다. 비정상 모드로 시작됩니다.");
+            _displayResult.DisplayError("MCP서버 및 LLM 서비스 초기화에 실패하였습니다. 비정상 모드로 시작됩니다.");
         }
         else if (!mcpHealthy)
         {
             _logger.LogWarning("MCP services failed initialization. Tool functionality will be limited.");
-            _consoleUI.DisplayError("MCP 서버 초기화에 실패하였습니다. 도구 사용이 제한됩니다.");
+            _displayResult.DisplayError("MCP 서버 초기화에 실패하였습니다. 도구 사용이 제한됩니다.");
         }
         else if (!llmHealthy)
         {
             _logger.LogWarning("LLM service failed initialization. AI responses will be unavailable.");
-            _consoleUI.DisplayError("LLM 서비스 초기화에 실패하였습니다. AI 응답이 제한됩니다.");
+            _displayResult.DisplayError("LLM 서비스 초기화에 실패하였습니다. AI 응답이 제한됩니다.");
         }
         else
         {
             _logger.LogInformation("All services initialized successfully. System ready for operation.");
-            _consoleUI.DisplaySuccessMessage("모든 서비스가 정상적으로 초기화 되었습니다. 시스템이 정상 작동합니다.");
+            _displayResult.DisplaySuccessMessage("모든 서비스가 정상적으로 초기화 되었습니다. 시스템이 정상 작동합니다.");
         }
     }
 

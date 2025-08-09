@@ -1,5 +1,4 @@
 using McpAgent.Application.Interfaces;
-using McpAgent.Application.Commands;
 using McpAgent.Domain.Entities;
 using McpAgent.Presentation.Console;
 using Microsoft.Extensions.Logging;

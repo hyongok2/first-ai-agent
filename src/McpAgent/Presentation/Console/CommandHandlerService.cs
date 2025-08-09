@@ -3,7 +3,7 @@ using McpAgent.Domain.Interfaces;
 using McpAgent.Presentation.Console;
 using Microsoft.Extensions.Logging;
 
-namespace McpAgent.Application.Commands;
+namespace McpAgent.Presentation.Console;
 
 public class CommandHandlerService
 {

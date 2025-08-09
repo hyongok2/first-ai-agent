@@ -1,5 +1,4 @@
 using McpAgent.Application.Agent;
-using McpAgent.Application.Commands;
 using McpAgent.Application.Interfaces;
 using McpAgent.Application.Services;
 using McpAgent.Configuration;
@@ -83,6 +82,8 @@ try
             services.AddSingleton<IMcpClientAdapter, ProperMcpClientAdapter>();
 
             // Presentation Services
+            services.AddSingleton<IDisplayResult, ConsoleUIService>();
+            services.AddSingleton<IDisplayProcess, ConsoleUIService>();
             services.AddSingleton<ConsoleUIService>();
             services.AddSingleton<InteractiveHostService>();
 

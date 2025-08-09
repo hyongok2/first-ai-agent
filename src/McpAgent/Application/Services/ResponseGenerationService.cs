@@ -14,9 +14,8 @@ public class ResponseGenerationService : BaseLlmService<ResponseGenerationServic
         ILlmProvider llmProvider,
         IPromptService promptService,
         IRequestResponseLogger requestResponseLogger,
-        IToolExecutor toolExecutor,
-        ConsoleUIService consoleUIService)
-        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor, consoleUIService)
+        IToolExecutor toolExecutor)
+        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor)
     {
     }
 
@@ -32,7 +31,7 @@ public class ResponseGenerationService : BaseLlmService<ResponseGenerationServic
         {
             Logger.LogInformation("Generating response using response-generation prompt for capability: {Capability}",
                 selectedCapability.Type);
-            ConsoleUIService.DisplayProcess("사용자 응답을 생성 중입니다...");
+                
             // response-generation.txt 프롬프트 사용
             return await GenerateResponseUsingTemplate(
                 refinedInput,

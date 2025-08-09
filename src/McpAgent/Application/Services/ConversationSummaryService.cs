@@ -18,9 +18,8 @@ public class ConversationSummaryService : BaseLlmService<ConversationSummaryServ
         ILlmProvider llmProvider,
         IPromptService promptService,
         IRequestResponseLogger requestResponseLogger,
-        IToolExecutor toolExecutor,
-        ConsoleUIService consoleUIService)
-        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor, consoleUIService)
+        IToolExecutor toolExecutor)
+        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor)
     {
     }
 
@@ -37,7 +36,6 @@ public class ConversationSummaryService : BaseLlmService<ConversationSummaryServ
         try
         {
             Logger.LogInformation("Summarizing turn {Turn}", turnNumber);
-            ConsoleUIService.DisplayProcess("진행 내용을 요약 중입니다...");
             
             // 대화 ID 결정 (systemContext에서 추출하거나 기본값 사용)
             var conversationId = ExtractConversationId(systemContext) ?? "default";

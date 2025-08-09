@@ -1,12 +1,11 @@
 using System.Text;
-using McpAgent.Application.Commands;
 using McpAgent.Domain.Entities;
 using McpAgent.Domain.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace McpAgent.Presentation.Console;
 
-public class ConsoleUIService
+public class ConsoleUIService : IDisplayProcess, IDisplayResult
 {
     private const int SessionIdDisplayLength = 8;
 

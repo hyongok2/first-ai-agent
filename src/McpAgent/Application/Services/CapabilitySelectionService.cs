@@ -14,9 +14,8 @@ public class CapabilitySelectionService : BaseLlmService<CapabilitySelectionServ
         ILlmProvider llmProvider,
         IPromptService promptService,
         IRequestResponseLogger requestResponseLogger,
-        IToolExecutor toolExecutor,
-        ConsoleUIService consoleUIService)
-        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor, consoleUIService)
+        IToolExecutor toolExecutor)
+        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor)
     {
     }
 
@@ -30,8 +29,6 @@ public class CapabilitySelectionService : BaseLlmService<CapabilitySelectionServ
         try
         {
             Logger.LogInformation("Selecting capability for intent: {Intent}", refinedInput.ClarifiedIntent);
-            
-            ConsoleUIService.DisplayProcess("사용할 기능을 선택 중입니다...");
 
             // 프롬프트 변수 준비
             var replacements = new Dictionary<string, string>

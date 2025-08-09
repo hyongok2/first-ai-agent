@@ -17,9 +17,8 @@ public class InputRefinementService : BaseLlmService<InputRefinementService>, II
         ILlmProvider llmProvider,
         IPromptService promptService,
         IRequestResponseLogger requestResponseLogger,
-        IToolExecutor toolExecutor,
-        ConsoleUIService consoleUIService)
-        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor, consoleUIService)
+        IToolExecutor toolExecutor)
+        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor)
     {
     }
 
@@ -32,7 +31,6 @@ public class InputRefinementService : BaseLlmService<InputRefinementService>, II
         try
         {
             Logger.LogInformation("Refining input using LLM with input-refinement prompt: {Input}", originalInput);
-            ConsoleUIService.DisplayProcess("사용자의 의도를 파악 중입니다...");
             
             // 프롬프트 변수 준비
             var replacements = new Dictionary<string, string>
