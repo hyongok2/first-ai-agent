@@ -97,11 +97,9 @@ public class AgentService : IAgentService
                 _logger.LogInformation("MCP initialization completed - {ServerCount} servers connected", connectedServers.Count);
                 return true;
             }
-            else
-            {
-                _logger.LogWarning("MCP initialized but no servers connected");
-                return false;
-            }
+            
+            _logger.LogWarning("MCP initialized but no servers connected");
+            return false;
         }
         catch (Exception ex)
         {

@@ -1,6 +1,5 @@
 using McpAgent.Application.Agent;
 using McpAgent.Application.Commands;
-using McpAgent.Application.Conversation;
 using McpAgent.Application.Interfaces;
 using McpAgent.Application.Services;
 using McpAgent.Configuration;
@@ -70,7 +69,6 @@ try
 
             // Legacy Application Services (keeping for compatibility)
             services.AddSingleton<IAgentService, AgentService>();
-            services.AddSingleton<ConversationService>();
             services.AddSingleton<CommandHandlerService>();
 
             // Infrastructure Services
