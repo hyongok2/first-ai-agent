@@ -25,7 +25,7 @@ public class ConsoleUIService
     public void DisplaySuccessMessage(string message)
     {
         System.Console.ForegroundColor = ConsoleColor.Green;
-        System.Console.WriteLine(message);
+        System.Console.WriteLine("🚀 성공: " + message);
         System.Console.ResetColor();
     }
 
@@ -39,7 +39,7 @@ public class ConsoleUIService
     public void DisplayError(string message)
     {
         System.Console.ForegroundColor = ConsoleColor.Red;
-        System.Console.WriteLine($"🛠️ Error: {message}");
+        System.Console.WriteLine($"🛠️ 에러: {message}");
         System.Console.ResetColor();
     }
 
