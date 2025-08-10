@@ -3,7 +3,6 @@ using System.Text.Json;
 using McpAgent.Application.Interfaces;
 using McpAgent.Domain.Entities;
 using McpAgent.Domain.Interfaces;
-using McpAgent.Presentation.Console;
 using Microsoft.Extensions.Logging;
 
 namespace McpAgent.Application.Services;
@@ -14,20 +13,25 @@ namespace McpAgent.Application.Services;
 public abstract class BaseLlmService<TService>
 {
     protected readonly ILogger<TService> Logger;
-    protected readonly ILlmProvider LlmProvider;
+    protected readonly ILlmProviderFactory LlmProviderFactory;
     protected readonly IPromptService PromptService;
     protected readonly IRequestResponseLogger RequestResponseLogger;
     protected readonly IToolExecutor ToolExecutor;
 
+    /// <summary>
+    /// 이 서비스가 사용하는 파이프라인 타입
+    /// </summary>
+    protected abstract PipelineType PipelineType { get; }
+
     protected BaseLlmService(
         ILogger<TService> logger,
-        ILlmProvider llmProvider,
+        ILlmProviderFactory llmProviderFactory,
         IPromptService promptService,
         IRequestResponseLogger requestResponseLogger,
         IToolExecutor toolExecutor)
     {
         Logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        LlmProvider = llmProvider ?? throw new ArgumentNullException(nameof(llmProvider));
+        LlmProviderFactory = llmProviderFactory ?? throw new ArgumentNullException(nameof(llmProviderFactory));
         PromptService = promptService ?? throw new ArgumentNullException(nameof(promptService));
         RequestResponseLogger = requestResponseLogger ?? throw new ArgumentNullException(nameof(requestResponseLogger));
         ToolExecutor = toolExecutor ?? throw new ArgumentNullException(nameof(toolExecutor));
@@ -41,22 +45,26 @@ public abstract class BaseLlmService<TService>
         string serviceName,
         CancellationToken cancellationToken = default)
     {
+        // 파이프라인 타입에 맞는 LLM Provider 가져오기
+        var llmProvider = LlmProviderFactory.CreateForPipeline(PipelineType);
+        
         var stopwatch = Stopwatch.StartNew();
         
-        var response = await LlmProvider.GenerateResponseAsync(prompt, cancellationToken);
+        var response = await llmProvider.GenerateResponseAsync(prompt, cancellationToken);
         
         stopwatch.Stop();
 
         // 비동기로 요청/응답 로깅
         _ = Task.Run(() => RequestResponseLogger.LogLlmRequestResponseAsync(
-            LlmProvider.GetLlmModel(), 
+            llmProvider.GetLlmModel(), 
             serviceName, 
             prompt, 
             response, 
             stopwatch.ElapsedMilliseconds, 
             cancellationToken));
 
-        Logger.LogDebug("{ServiceName} LLM response: {Response}", serviceName, response);
+        Logger.LogDebug("{ServiceName} LLM response: {Response} (Pipeline: {PipelineType}, Model: {Model})", 
+            serviceName, response, PipelineType, llmProvider.GetLlmModel());
         
         return response;
     }

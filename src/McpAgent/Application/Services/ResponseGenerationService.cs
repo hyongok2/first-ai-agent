@@ -9,13 +9,15 @@ namespace McpAgent.Application.Services;
 
 public class ResponseGenerationService : BaseLlmService<ResponseGenerationService>, IResponseGenerationService
 {
+    protected override PipelineType PipelineType => PipelineType.ResponseGeneration;
+
     public ResponseGenerationService(
         ILogger<ResponseGenerationService> logger,
-        ILlmProvider llmProvider,
+        ILlmProviderFactory llmProviderFactory,
         IPromptService promptService,
         IRequestResponseLogger requestResponseLogger,
         IToolExecutor toolExecutor)
-        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor)
+        : base(logger, llmProviderFactory, promptService, requestResponseLogger, toolExecutor)
     {
     }
 

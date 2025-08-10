@@ -9,13 +9,15 @@ namespace McpAgent.Application.Services;
 
 public class ParameterGenerationService : BaseLlmService<ParameterGenerationService>, IParameterGenerationService
 {
+    protected override PipelineType PipelineType => PipelineType.ParameterGeneration;
+
     public ParameterGenerationService(
         ILogger<ParameterGenerationService> logger,
-        ILlmProvider llmProvider,
+        ILlmProviderFactory llmProviderFactory,
         IPromptService promptService,
         IRequestResponseLogger requestResponseLogger,
         IToolExecutor toolExecutor)
-        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor)
+        : base(logger, llmProviderFactory, promptService, requestResponseLogger, toolExecutor)
     {
     }
 

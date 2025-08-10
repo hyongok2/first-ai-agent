@@ -12,14 +12,16 @@ public class ConversationSummaryService : BaseLlmService<ConversationSummaryServ
     // In-memory storage for conversation summaries
     // In a production environment, this should be replaced with persistent storage
     private readonly Dictionary<string, ConversationSummary> _conversationSummaries = new();
+    
+    protected override PipelineType PipelineType => PipelineType.ConversationSummary;
 
     public ConversationSummaryService(
         ILogger<ConversationSummaryService> logger,
-        ILlmProvider llmProvider,
+        ILlmProviderFactory llmProviderFactory,
         IPromptService promptService,
         IRequestResponseLogger requestResponseLogger,
         IToolExecutor toolExecutor)
-        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor)
+        : base(logger, llmProviderFactory, promptService, requestResponseLogger, toolExecutor)
     {
     }
 

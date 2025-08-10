@@ -12,13 +12,15 @@ namespace McpAgent.Application.Services;
 /// </summary>
 public class InputRefinementService : BaseLlmService<InputRefinementService>, IInputRefinementService
 {
+    protected override PipelineType PipelineType => PipelineType.InputRefinement;
+
     public InputRefinementService(
         ILogger<InputRefinementService> logger,
-        ILlmProvider llmProvider,
+        ILlmProviderFactory llmProviderFactory,
         IPromptService promptService,
         IRequestResponseLogger requestResponseLogger,
         IToolExecutor toolExecutor)
-        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor)
+        : base(logger, llmProviderFactory, promptService, requestResponseLogger, toolExecutor)
     {
     }
 

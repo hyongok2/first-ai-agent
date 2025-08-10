@@ -2,6 +2,7 @@ using McpAgent.Application.Agent;
 using McpAgent.Application.Interfaces;
 using McpAgent.Application.Services;
 using McpAgent.Configuration;
+using McpAgent.Domain.Entities;
 using McpAgent.Domain.Interfaces;
 using McpAgent.Domain.Services;
 using McpAgent.Infrastructure.LLM;
@@ -41,6 +42,7 @@ try
             // Configuration
             services.Configure<AgentConfiguration>(context.Configuration.GetSection("Agent"));
             services.Configure<LlmConfiguration>(context.Configuration.GetSection("Agent:Llm"));
+            services.Configure<PipelineLlmConfiguration>(context.Configuration.GetSection("Agent:PipelineLlm"));
             
             // Logging (파일 로깅만, 콘솔 로깅 제거)
             services.AddLogging(builder =>
@@ -70,7 +72,8 @@ try
             services.AddSingleton<CommandHandlerService>();
 
             // Infrastructure Services
-            services.AddSingleton<ILlmProvider, OllamaProvider>(); // New interface for multi-step pipeline
+            services.AddSingleton<ILlmProvider, OllamaProvider>(); // Backward compatibility
+            services.AddSingleton<ILlmProviderFactory, LlmProviderFactory>(); // New pipeline-aware factory
             services.AddSingleton<IPromptService, PromptService>();
             services.AddSingleton<IToolExecutor, McpToolExecutor>();
             services.AddSingleton<IConversationRepository, InMemoryConversationRepository>();

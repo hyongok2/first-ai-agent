@@ -9,13 +9,15 @@ namespace McpAgent.Application.Services;
 
 public class CapabilitySelectionService : BaseLlmService<CapabilitySelectionService>, ICapabilitySelectionService
 {
+    protected override PipelineType PipelineType => PipelineType.CapabilitySelection;
+
     public CapabilitySelectionService(
         ILogger<CapabilitySelectionService> logger,
-        ILlmProvider llmProvider,
+        ILlmProviderFactory llmProviderFactory,
         IPromptService promptService,
         IRequestResponseLogger requestResponseLogger,
         IToolExecutor toolExecutor)
-        : base(logger, llmProvider, promptService, requestResponseLogger, toolExecutor)
+        : base(logger, llmProviderFactory, promptService, requestResponseLogger, toolExecutor)
     {
     }
 
