@@ -1,9 +1,11 @@
 using McpAgent.Application.Interfaces;
+using McpAgent.Configuration;
 using McpAgent.Domain.Entities;
 using McpAgent.Domain.Interfaces;
 using McpAgent.Domain.Services;
 using McpAgent.Presentation.Console;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace McpAgent.Application.Agent;
 
@@ -11,27 +13,50 @@ public class AgentService : IAgentService
 {
     private readonly ILogger<AgentService> _logger;
     private readonly AgentOrchestrator _orchestrator;
+    private readonly OptimizedAgentOrchestrator _optimizedOrchestrator;
     private readonly IMcpClientAdapter _mcpClient;
     private readonly ILlmProvider _llmProvider;
-
     private readonly IDisplayResult _displayResult;
+    private readonly AgentSettings _agentSettings;
 
-    public AgentService(ILogger<AgentService> logger, AgentOrchestrator orchestrator, IMcpClientAdapter mcpClient, ILlmProvider llmProvider, IDisplayResult displayResult)
+    public AgentService(
+        ILogger<AgentService> logger, 
+        AgentOrchestrator orchestrator, 
+        OptimizedAgentOrchestrator optimizedOrchestrator,
+        IMcpClientAdapter mcpClient, 
+        ILlmProvider llmProvider, 
+        IDisplayResult displayResult,
+        IOptions<AgentSettings> agentSettings)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
+        _optimizedOrchestrator = optimizedOrchestrator ?? throw new ArgumentNullException(nameof(optimizedOrchestrator));
         _mcpClient = mcpClient ?? throw new ArgumentNullException(nameof(mcpClient));
         _llmProvider = llmProvider ?? throw new ArgumentNullException(nameof(llmProvider));
         _displayResult = displayResult ?? throw new ArgumentNullException(nameof(displayResult));
+        _agentSettings = agentSettings?.Value ?? throw new ArgumentNullException(nameof(agentSettings));
+        
+        _logger.LogInformation("AgentService initialized with {Pipeline} pipeline", 
+            _agentSettings.UseOptimizedPipeline ? "optimized" : "legacy");
     }
 
     public async Task<AgentResponse> ProcessRequestAsync(AgentRequest request, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Processing agent request for conversation {ConversationId}", request.ConversationId);
+        _logger.LogInformation("Processing agent request for conversation {ConversationId} using {Pipeline} pipeline", 
+            request.ConversationId, _agentSettings.UseOptimizedPipeline ? "optimized" : "legacy");
 
         try
         {
-            var response = await _orchestrator.ProcessRequestAsync(request, cancellationToken);
+            AgentResponse response;
+            
+            if (_agentSettings.UseOptimizedPipeline)
+            {
+                response = await _optimizedOrchestrator.ProcessRequestAsync(request, cancellationToken);
+            }
+            else
+            {
+                response = await _orchestrator.ProcessRequestAsync(request, cancellationToken);
+            }
 
             _logger.LogInformation("Agent request processed successfully for conversation {ConversationId}", request.ConversationId);
             return response;

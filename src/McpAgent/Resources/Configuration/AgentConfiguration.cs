@@ -4,6 +4,31 @@ public class AgentConfiguration
 {
     public LlmConfiguration Llm { get; set; } = new();
     public McpConfiguration Mcp { get; set; } = new();
+    public AgentSettings Agent { get; set; } = new();
+}
+
+public class AgentSettings
+{
+    /// <summary>
+    /// 최적화된 파이프라인 사용 여부 (기본값: true)
+    /// true: 통합 분석으로 LLM 호출 최소화, false: 기존 파이프라인 사용
+    /// </summary>
+    public bool UseOptimizedPipeline { get; set; } = true;
+    
+    /// <summary>
+    /// 최대 대화 이력 길이
+    /// </summary>
+    public int MaxHistoryLength { get; set; } = 50;
+    
+    /// <summary>
+    /// 최대 툴 체인 반복 횟수
+    /// </summary>
+    public int MaxToolChainIterations { get; set; } = 5;
+    
+    /// <summary>
+    /// 도구 체이닝 사용 여부
+    /// </summary>
+    public bool EnableToolChaining { get; set; } = true;
 }
 
 public class LlmConfiguration

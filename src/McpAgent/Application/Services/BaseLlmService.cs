@@ -54,6 +54,24 @@ public abstract class BaseLlmService<TService>
         
         stopwatch.Stop();
 
+        // 빈 응답 체크
+        if (string.IsNullOrWhiteSpace(response))
+        {
+            Logger.LogError("{ServiceName} received empty response from LLM (Pipeline: {PipelineType}, Model: {Model})", 
+                serviceName, PipelineType, llmProvider.GetLlmModel());
+            
+            // 빈 응답을 로깅하고 예외 발생
+            _ = Task.Run(() => RequestResponseLogger.LogLlmRequestResponseAsync(
+                llmProvider.GetLlmModel(), 
+                serviceName, 
+                prompt, 
+                "[EMPTY RESPONSE]", 
+                stopwatch.ElapsedMilliseconds, 
+                cancellationToken));
+            
+            throw new InvalidOperationException($"LLM returned empty response for {serviceName} (Model: {llmProvider.GetLlmModel()})");
+        }
+
         // 비동기로 요청/응답 로깅
         _ = Task.Run(() => RequestResponseLogger.LogLlmRequestResponseAsync(
             llmProvider.GetLlmModel(), 

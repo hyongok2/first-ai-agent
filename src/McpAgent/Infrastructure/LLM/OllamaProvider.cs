@@ -37,12 +37,21 @@ public class OllamaProvider : ILlmProvider
         {
             _logger.LogDebug("Generating response for prompt: {Prompt}", prompt.Substring(0, Math.Min(100, prompt.Length)));
 
-            var response = await _kernel.InvokePromptAsync(prompt, cancellationToken: cancellationToken);
+            // 60초 타임아웃 설정
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+            using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+
+            var response = await _kernel.InvokePromptAsync(prompt, cancellationToken: combinedCts.Token);
             var result = response.GetValue<string>() ?? string.Empty;
 
             _logger.LogDebug("Generated response length: {Length}", result.Length);
 
             return result;
+        }
+        catch (OperationCanceledException ex) when (ex.CancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning("LLM request timed out or was cancelled for model: {Model}", _llmModel);
+            throw new AgentException("LLM_TIMEOUT", "LLM request timed out", ex);
         }
         catch (Exception ex)
         {

@@ -1,5 +1,6 @@
 using McpAgent.Domain.Entities;
 using McpAgent.Domain.Interfaces;
+using McpAgent.Application.Interfaces;
 using McpAgent.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -7,25 +8,23 @@ using Microsoft.Extensions.Options;
 namespace McpAgent.Domain.Services;
 
 /// <summary>
-/// Multi-step pipeline orchestrator using dedicated prompt templates
+/// 최적화된 멀티사이클 파이프라인 오케스트레이터
+/// LLM 호출 횟수를 최소화하여 성능을 크게 개선
 /// </summary>
-public class AgentOrchestrator
+public class OptimizedAgentOrchestrator
 {
-    private readonly ILogger<AgentOrchestrator> _logger;
-    private readonly IInputRefinementService _inputRefinementService;
-    private readonly ICapabilitySelectionService _capabilitySelectionService;
+    private readonly ILogger<OptimizedAgentOrchestrator> _logger;
+    private readonly IIntegratedAnalysisService _integratedAnalysisService;
     private readonly IParameterGenerationService _parameterGenerationService;
     private readonly IResponseGenerationService _responseGenerationService;
     private readonly IConversationRepository _conversationRepository;
     private readonly IToolExecutor _toolExecutor;
-
     private readonly IDisplayProcess _displayProcess;
     private readonly AgentSettings _agentSettings;
 
-    public AgentOrchestrator(
-        ILogger<AgentOrchestrator> logger,
-        IInputRefinementService inputRefinementService,
-        ICapabilitySelectionService capabilitySelectionService,
+    public OptimizedAgentOrchestrator(
+        ILogger<OptimizedAgentOrchestrator> logger,
+        IIntegratedAnalysisService integratedAnalysisService,
         IParameterGenerationService parameterGenerationService,
         IResponseGenerationService responseGenerationService,
         IConversationRepository conversationRepository,
@@ -34,8 +33,7 @@ public class AgentOrchestrator
         IOptions<AgentSettings> agentSettings)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _inputRefinementService = inputRefinementService ?? throw new ArgumentNullException(nameof(inputRefinementService));
-        _capabilitySelectionService = capabilitySelectionService ?? throw new ArgumentNullException(nameof(capabilitySelectionService));
+        _integratedAnalysisService = integratedAnalysisService ?? throw new ArgumentNullException(nameof(integratedAnalysisService));
         _parameterGenerationService = parameterGenerationService ?? throw new ArgumentNullException(nameof(parameterGenerationService));
         _responseGenerationService = responseGenerationService ?? throw new ArgumentNullException(nameof(responseGenerationService));
         _conversationRepository = conversationRepository ?? throw new ArgumentNullException(nameof(conversationRepository));
@@ -48,121 +46,85 @@ public class AgentOrchestrator
     {
         try
         {
-            _logger.LogInformation("Starting multi-cycle pipeline for conversation {ConversationId}", request.ConversationId);
+            _logger.LogInformation("Starting optimized multi-cycle pipeline for conversation {ConversationId}", request.ConversationId);
 
-            var conversation = await _conversationRepository.GetByIdAsync(request.ConversationId, cancellationToken)
-                ?? await _conversationRepository.CreateAsync(request.ConversationId, cancellationToken);
-
-            // Add user message to conversation (기존 방식)
+            var conversation = await GetOrCreateConversationAsync(request.ConversationId, cancellationToken);
+            
+            // 사용자 메시지 추가
             var userMessage = new ConversationMessage(MessageRole.User, request.Message);
             conversation.AddMessage(userMessage);
 
             var systemContext = $"AI 에이전트 - 대화ID: {request.ConversationId}";
-
             var allToolExecutionResults = new List<ToolExecution>();
+            var cumulativePlans = new List<string>();
             var cycleCount = 0;
             var maxCycles = _agentSettings.MaxToolChainIterations;
 
             string currentInput = request.Message;
             string finalResponse = "";
 
-            // 턴 번호 계산 (기존 방식)
-            var turnNumber = conversation.GetMessages().Count(m => m.Role == MessageRole.User);
-
-            // 초기 입력 정제 (처음에 한 번만 수행) - 사용자 원본 의도 보존
+            // 초기 입력을 위한 변수들
             RefinedInput? initialRefinedInput = null;
-            SystemCapability? finalSelectedCapability = null;
-
-            // 누적 계획 관리: 각 사이클마다 새로운 계획이 추가됨
-            var cumulativePlans = new List<string>();
 
             while (cycleCount < maxCycles)
             {
                 cycleCount++;
-                _logger.LogInformation("Starting cycle {CycleCount} for conversation {ConversationId}", cycleCount, request.ConversationId);
+                _logger.LogInformation("Starting optimized cycle {CycleCount} for conversation {ConversationId}", cycleCount, request.ConversationId);
 
-                // 각 사이클마다 최신 대화 이력 가져오기 (도구 실행 결과가 추가될 수 있으므로)
                 var conversationHistory = conversation.GetRecentMessages(_agentSettings.MaxHistoryLength);
+                
+                // 통합 분석 수행 (입력 분석 + 기능 선택 + 즉시 응답 판단을 한번에)
+                _displayProcess.DisplayProcess($"사용자 의도를 파악하고 최적의 처리 방안을 결정 중입니다... [사이클: {cycleCount}]");
+                
+                var analysisResult = await _integratedAnalysisService.AnalyzeAndSelectAsync(
+                    currentInput,
+                    conversationHistory,
+                    BuildEnhancedSystemContext(systemContext, cumulativePlans),
+                    allToolExecutionResults,
+                    cumulativePlans,
+                    cancellationToken);
 
-                RefinedInput refinedInput;
-
+                // 초기 입력 정보 저장
                 if (cycleCount == 1)
                 {
-                    // 첫 번째 사이클: 사용자 원본 요청을 정제
-                    _logger.LogInformation("Cycle {CycleCount} - Step 1: Initial input refinement", cycleCount);
-                    _displayProcess.DisplayProcess($"사용자의 의도를 파악 중입니다... [사이클: {cycleCount}]");
-                    refinedInput = await _inputRefinementService.RefineInputAsync(
-                        currentInput,
-                        conversationHistory,
-                        systemContext,
-                        cancellationToken);
-                    initialRefinedInput = refinedInput;
-
-                    // 첫 번째 계획을 누적 계획에 추가
-                    if (!string.IsNullOrEmpty(refinedInput.SuggestedPlan))
+                    initialRefinedInput = analysisResult.RefinedInput;
+                    
+                    // 첫 번째 계획 추가
+                    if (!string.IsNullOrEmpty(analysisResult.RefinedInput.SuggestedPlan))
                     {
-                        cumulativePlans.Add($"[사이클 {cycleCount}] {refinedInput.SuggestedPlan}");
-                        _logger.LogInformation("Initial plan added: {Plan}", refinedInput.SuggestedPlan);
+                        cumulativePlans.Add($"[사이클 {cycleCount}] {analysisResult.RefinedInput.SuggestedPlan}");
+                        _logger.LogInformation("Initial plan added: {Plan}", analysisResult.RefinedInput.SuggestedPlan);
                     }
                 }
                 else
                 {
-                    // 후속 사이클: 원본 의도를 유지하면서 현재 상황 반영하고 누적 계획 포함
-                    _logger.LogInformation("Cycle {CycleCount} - Step 1: Context-aware refinement with cumulative plans", cycleCount);
-
-                    // 누적 계획 정보 구성
-                    var allPlansInfo = cumulativePlans.Count > 0
-                        ? $"\n\n[누적된 제안 계획들]\n{string.Join("\n", cumulativePlans)}"
-                        : "";
-
-                    // 원본 사용자 의도와 현재 도구 실행 결과, 누적 계획을 결합한 컨텍스트 생성
-                    var enhancedContext = $"{systemContext}\n\n[원본 사용자 요청]\n의도: {initialRefinedInput?.ClarifiedIntent ?? "확인 필요"}\n요청: {initialRefinedInput?.RefinedQuery ?? currentInput}{allPlansInfo}\n\n[현재 상황]\n{currentInput}";
-                    _displayProcess.DisplayProcess($"이전 조사를 바탕으로 사용자의 의도를 다시 파악 중입니다... [사이클: {cycleCount}]");
-                    refinedInput = await _inputRefinementService.RefineInputAsync(
-                        currentInput,
-                        conversationHistory,
-                        enhancedContext,
-                        cancellationToken);
-
-                    // 새로운 계획이 제안되었으면 누적 계획에 추가
-                    if (!string.IsNullOrEmpty(refinedInput.SuggestedPlan))
+                    // 후속 사이클의 새로운 계획 추가
+                    if (!string.IsNullOrEmpty(analysisResult.RefinedInput.SuggestedPlan))
                     {
-                        cumulativePlans.Add($"[사이클 {cycleCount}] {refinedInput.SuggestedPlan}");
-                        _logger.LogInformation("Additional plan added for cycle {Cycle}: {Plan}", cycleCount, refinedInput.SuggestedPlan);
+                        cumulativePlans.Add($"[사이클 {cycleCount}] {analysisResult.RefinedInput.SuggestedPlan}");
+                        _logger.LogInformation("Additional plan added for cycle {Cycle}: {Plan}", cycleCount, analysisResult.RefinedInput.SuggestedPlan);
                     }
                 }
 
-                // Step 2: Capability Selection
-                _logger.LogInformation("Cycle {CycleCount} - Step 2: Capability selection", cycleCount);
+                // 즉시 응답이 가능한 경우 - LLM 호출 없이 바로 완료!
+                if (analysisResult.HasDirectResponse)
+                {
+                    _logger.LogInformation("Cycle {CycleCount} - Direct response available, completing immediately", cycleCount);
+                    _displayProcess.DisplayProcess($"응답을 생성했습니다... [사이클: {cycleCount}]");
+                    
+                    finalResponse = analysisResult.DirectResponseMessage;
+                    break;
+                }
 
-                // 누적 계획 정보가 포함된 시스템 컨텍스트 생성
-                var cumulativePlansInfo = cumulativePlans.Count > 0
-                    ? $"\n\n[진행 계획 상태]\n{string.Join("\n", cumulativePlans)}"
-                    : "";
-                var enhancedSystemContext = $"{systemContext}{cumulativePlansInfo}";
-
-                // Get available capabilities
-                _displayProcess.DisplayProcess($"분석된 의도를 기준으로 사용할 기능을 선택 중입니다... [사이클: {cycleCount}]");
-                var selectedCapability = await _capabilitySelectionService.SelectCapabilityAsync(
-                    refinedInput,
-                    conversationHistory,
-                    enhancedSystemContext,
-                    allToolExecutionResults,
-                    cancellationToken);
-
-                // 마지막 선택된 capability 저장
-                finalSelectedCapability = selectedCapability;
-
-                // 작업 완료 체크: TaskCompletion이 선택되면 종료
-                if (selectedCapability.Type == SystemCapabilityType.TaskCompletion)
+                // 작업 완료인 경우 (응답 생성 필요)
+                if (analysisResult.SelectedCapability.Type == SystemCapabilityType.TaskCompletion)
                 {
                     _logger.LogInformation("Cycle {CycleCount} - Task completion detected, generating final response", cycleCount);
-
-                    // Step 5: Final Response Generation
-                    _displayProcess.DisplayProcess($"사용자 응답을 생성 중입니다... [사이클: {cycleCount}]");
+                    _displayProcess.DisplayProcess($"최종 응답을 생성 중입니다... [사이클: {cycleCount}]");
+                    
                     finalResponse = await _responseGenerationService.GenerateResponseAsync(
-                        refinedInput,
-                        selectedCapability,
+                        analysisResult.RefinedInput,
+                        analysisResult.SelectedCapability,
                         conversationHistory,
                         allToolExecutionResults,
                         systemContext,
@@ -170,13 +132,14 @@ public class AgentOrchestrator
                     break;
                 }
 
-                // Step 3 & 4: Tool Execution (if needed)
-                if (selectedCapability.Type == SystemCapabilityType.McpTool)
+                // MCP 도구 실행이 필요한 경우
+                if (analysisResult.SelectedCapability.Type == SystemCapabilityType.McpTool)
                 {
-                    _displayProcess.DisplayProcess($"MCP 도구를 사용 합니다... [사이클: {cycleCount}]");
+                    _displayProcess.DisplayProcess($"MCP 도구를 실행 중입니다... [사이클: {cycleCount}]");
+                    
                     var toolExecution = await ExecuteToolAsync(
-                        selectedCapability,
-                        refinedInput,
+                        analysisResult.SelectedCapability,
+                        analysisResult.RefinedInput,
                         conversationHistory,
                         systemContext,
                         cumulativePlans,
@@ -187,13 +150,14 @@ public class AgentOrchestrator
                     {
                         allToolExecutionResults.Add(toolExecution);
 
-                        // 도구 실행 결과를 다음 사이클의 입력으로 사용하되, 원본 의도와 계획을 명시적으로 포함
+                        // 다음 사이클을 위한 입력 준비
                         var planContext = !string.IsNullOrEmpty(initialRefinedInput?.SuggestedPlan)
                             ? $"\n원본 제안 계획: {initialRefinedInput.SuggestedPlan}"
                             : "";
+                        
                         currentInput = $"[원본 사용자 요청 목표: {initialRefinedInput?.ClarifiedIntent ?? "사용자 요청 처리"}]{planContext}\n\n이전 도구 '{toolExecution.ToolName}' 실행 결과: {toolExecution.Result}\n\n원본 사용자 요청과 제안된 계획에 따라 추가 작업이 필요한지 판단하고 다음 단계를 진행해주세요.";
 
-                        // 도구 실행 결과를 대화 이력에 추가 (기존 방식)
+                        // 도구 실행 결과를 대화 이력에 추가
                         var toolMessage = new ConversationMessage(MessageRole.Assistant,
                             $"도구 '{toolExecution.ToolName}' 실행 완료. 결과: {toolExecution.Result}");
                         conversation.AddMessage(toolMessage);
@@ -211,7 +175,7 @@ public class AgentOrchestrator
                                 parameters: new Dictionary<string, object>());
                             
                             finalResponse = await _responseGenerationService.GenerateResponseAsync(
-                                refinedInput,
+                                analysisResult.RefinedInput,
                                 taskCompletionCapability,
                                 conversationHistory,
                                 allToolExecutionResults,
@@ -220,15 +184,15 @@ public class AgentOrchestrator
                             break;
                         }
 
-                        // 다음 사이클로 계속 진행
                         continue;
                     }
                     else
                     {
-                        // 도구 실행 실패시에도 다음 사이클로 진행하여 다른 방법을 시도하되, 원본 의도와 계획 유지
+                        // 도구 실행 실패시 처리
                         var planContext = !string.IsNullOrEmpty(initialRefinedInput?.SuggestedPlan)
                             ? $"\n원본 제안 계획: {initialRefinedInput.SuggestedPlan}"
                             : "";
+                        
                         currentInput = $"[원본 사용자 요청 목표: {initialRefinedInput?.ClarifiedIntent ?? "사용자 요청 처리"}]{planContext}\n\n이전 도구 실행이 실패했습니다. 원본 사용자 요청과 제안된 계획에 따라 다른 방법을 시도하거나 작업을 완료해주세요.";
                         continue;
                     }
@@ -236,7 +200,7 @@ public class AgentOrchestrator
                 else
                 {
                     // TaskPlanning인 경우 계속 진행, 다른 기능은 최종 응답 생성
-                    if (selectedCapability.Type == SystemCapabilityType.TaskPlanning)
+                    if (analysisResult.SelectedCapability.Type == SystemCapabilityType.TaskPlanning)
                     {
                         _logger.LogInformation("Cycle {CycleCount} - Task planning detected, continuing to next cycle", cycleCount);
                         _displayProcess.DisplayProcess($"계획을 수립하고 다음 단계를 진행합니다... [사이클: {cycleCount}]");
@@ -250,19 +214,20 @@ public class AgentOrchestrator
                         
                         // 계획 메시지를 대화 이력에 추가
                         var planningMessage = new ConversationMessage(MessageRole.Assistant,
-                            $"계획 수립 완료: {refinedInput.SuggestedPlan ?? "구체적인 계획이 생성되었습니다."}");
+                            $"계획 수립 완료: {analysisResult.RefinedInput.SuggestedPlan ?? "구체적인 계획이 생성되었습니다."}");
                         conversation.AddMessage(planningMessage);
                         
                         continue;
                     }
                     else
                     {
-                        // MCP 도구가 아닌 경우 (SimpleChat, IntentClarification 등) 최종 응답 생성
+                        // 다른 기능인 경우 최종 응답 생성
                         _logger.LogInformation("Cycle {CycleCount} - Non-tool capability selected, generating response", cycleCount);
                         _displayProcess.DisplayProcess($"사용자 응답을 생성 중입니다... [사이클: {cycleCount}]");
+                        
                         finalResponse = await _responseGenerationService.GenerateResponseAsync(
-                            refinedInput,
-                            selectedCapability,
+                            analysisResult.RefinedInput,
+                            analysisResult.SelectedCapability,
                             conversationHistory,
                             allToolExecutionResults,
                             systemContext,
@@ -272,47 +237,42 @@ public class AgentOrchestrator
                 }
             }
 
-            // 최대 사이클 도달 시 강제 종료 응답
+            // 최대 사이클 도달 시 강제 종료 처리
             if (cycleCount >= maxCycles && string.IsNullOrEmpty(finalResponse))
             {
-                _logger.LogWarning("Maximum cycles ({MaxCycles}) reached for conversation {ConversationId}", maxCycles, request.ConversationId);
-
-                var taskCompletionCapability = new SystemCapability(
-                    type: SystemCapabilityType.TaskCompletion,
-                    description: "Maximum processing cycles reached",
-                    reasoning: "최대 처리 사이클에 도달하여 작업을 완료합니다.",
-                    parameters: new Dictionary<string, object>());
-
-                var completionRefinedInput = new RefinedInput(
-                    originalInput: "작업을 완료하고 최종 응답을 생성합니다.",
-                    clarifiedIntent: "최대 처리 사이클에 도달하여 작업을 완료합니다.",
-                    refinedQuery: "작업을 완료하고 최종 응답을 생성합니다.",
-                    intentConfidence: ConfidenceLevel.High);
-                _displayProcess.DisplayProcess($"사용자 응답을 생성 중입니다... [사이클: {cycleCount}]");
-                finalResponse = await _responseGenerationService.GenerateResponseAsync(
-                    completionRefinedInput,
-                    taskCompletionCapability,
-                    conversation.GetMessages(),
-                    allToolExecutionResults,
-                    systemContext,
-                    cancellationToken);
+                finalResponse = await HandleMaxCyclesReached(maxCycles, request.ConversationId, conversation, allToolExecutionResults, systemContext, cancellationToken);
             }
 
+            // 최종 응답을 대화 이력에 추가
             var finalAssistantMessage = new ConversationMessage(MessageRole.Assistant, finalResponse);
             conversation.AddMessage(finalAssistantMessage);
 
             await _conversationRepository.SaveAsync(conversation, cancellationToken);
 
-            _logger.LogInformation("Multi-cycle pipeline completed after {CycleCount} cycles for conversation {ConversationId}",
+            _logger.LogInformation("Optimized multi-cycle pipeline completed after {CycleCount} cycles for conversation {ConversationId}",
                 cycleCount, request.ConversationId);
 
             return AgentResponse.Success(finalResponse, request.ConversationId);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Multi-cycle pipeline failed for conversation {ConversationId}", request.ConversationId);
+            _logger.LogError(ex, "Optimized multi-cycle pipeline failed for conversation {ConversationId}", request.ConversationId);
             return AgentResponse.Failure($"Failed to process request: {ex.Message}", request.ConversationId);
         }
+    }
+
+    private async Task<Conversation> GetOrCreateConversationAsync(string conversationId, CancellationToken cancellationToken)
+    {
+        return await _conversationRepository.GetByIdAsync(conversationId, cancellationToken)
+               ?? await _conversationRepository.CreateAsync(conversationId, cancellationToken);
+    }
+
+    private string BuildEnhancedSystemContext(string systemContext, List<string> cumulativePlans)
+    {
+        var cumulativePlansInfo = cumulativePlans.Count > 0
+            ? $"\n\n[진행 계획 상태]\n{string.Join("\n", cumulativePlans)}"
+            : "";
+        return $"{systemContext}{cumulativePlansInfo}";
     }
 
     private async Task<ToolExecution?> ExecuteToolAsync(
@@ -325,7 +285,7 @@ public class AgentOrchestrator
         CancellationToken cancellationToken)
     {
         var toolName = ExtractToolName(selectedCapability);
-        _logger.LogInformation("Cycle {CycleCount} - Step 3: Parameter generation for tool: {ToolName}", cycleCount, toolName);
+        _logger.LogInformation("Cycle {CycleCount} - Parameter generation for tool: {ToolName}", cycleCount, toolName);
 
         var selectedTool = await GetToolByNameAsync(toolName, cancellationToken);
         if (selectedTool == null)
@@ -378,8 +338,8 @@ public class AgentOrchestrator
         if (selectedTool.Parameters.Any())
         {
             var enhancedSystemContext = BuildEnhancedSystemContext(systemContext, cumulativePlans);
-            parameters = await _parameterGenerationService.GenerateParametersAsync(selectedTool.Name, selectedTool,
-                               refinedInput, conversationHistory, enhancedSystemContext, cancellationToken);
+            parameters = await _parameterGenerationService.GenerateParametersAsync(
+                selectedTool.Name, selectedTool, refinedInput, conversationHistory, enhancedSystemContext, cancellationToken);
 
             _logger.LogInformation("Cycle {CycleCount} - Generated parameters for tool {ToolName}: {@Parameters}",
                 cycleCount, selectedTool.Name, parameters);
@@ -388,21 +348,13 @@ public class AgentOrchestrator
         return await ExecuteToolWithParametersAsync(selectedTool, parameters, cycleCount, cancellationToken);
     }
 
-    private string BuildEnhancedSystemContext(string systemContext, List<string> cumulativePlans)
-    {
-        var cumulativePlansInfo = cumulativePlans.Count > 0
-            ? $"\n\n[진행 계획 상태]\n{string.Join("\n", cumulativePlans)}"
-            : "";
-        return $"{systemContext}{cumulativePlansInfo}";
-    }
-
     private async Task<ToolExecution> ExecuteToolWithParametersAsync(
         ToolDefinition selectedTool,
         Dictionary<string, object> parameters,
         int cycleCount,
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Cycle {CycleCount} - Step 4: Tool execution", cycleCount);
+        _logger.LogInformation("Cycle {CycleCount} - Tool execution", cycleCount);
 
         var startTime = DateTime.UtcNow;
         var toolCall = await _toolExecutor.ExecuteAsync(selectedTool.Name, parameters, cancellationToken);
@@ -422,5 +374,38 @@ public class AgentOrchestrator
             cycleCount, selectedTool.Name, toolCall.IsSuccess);
 
         return toolExecution;
+    }
+
+    private async Task<string> HandleMaxCyclesReached(
+        int maxCycles,
+        string conversationId,
+        Conversation conversation,
+        List<ToolExecution> allToolExecutionResults,
+        string systemContext,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogWarning("Maximum cycles ({MaxCycles}) reached for conversation {ConversationId}", maxCycles, conversationId);
+
+        var taskCompletionCapability = new SystemCapability(
+            type: SystemCapabilityType.TaskCompletion,
+            description: "Maximum processing cycles reached",
+            reasoning: "최대 처리 사이클에 도달하여 작업을 완료합니다.",
+            parameters: new Dictionary<string, object>());
+
+        var completionRefinedInput = new RefinedInput(
+            originalInput: "작업을 완료하고 최종 응답을 생성합니다.",
+            clarifiedIntent: "최대 처리 사이클에 도달하여 작업을 완료합니다.",
+            refinedQuery: "작업을 완료하고 최종 응답을 생성합니다.",
+            intentConfidence: ConfidenceLevel.High);
+
+        _displayProcess.DisplayProcess($"최종 응답을 생성 중입니다... [최대 사이클 도달]");
+        
+        return await _responseGenerationService.GenerateResponseAsync(
+            completionRefinedInput,
+            taskCompletionCapability,
+            conversation.GetMessages(),
+            allToolExecutionResults,
+            systemContext,
+            cancellationToken);
     }
 }

@@ -28,5 +28,10 @@ public enum PipelineType
     /// <summary>
     /// 대화 요약 단계 - 대화 내용 요약
     /// </summary>
-    ConversationSummary
+    ConversationSummary,
+
+    /// <summary>
+    /// 통합 분석 단계 - 입력 분석과 능력 선택을 동시 수행 (최적화 파이프라인)
+    /// </summary>
+    IntegratedAnalysis
 }

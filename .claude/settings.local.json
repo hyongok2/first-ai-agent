@@ -21,7 +21,9 @@
       "Bash(node:*)",
       "Bash(dotnet script:*)",
       "Bash(csc:*)",
-      "Bash(test-json-serialization.exe)"
+      "Bash(test-json-serialization.exe)",
+      "Bash(copy:*)",
+      "Bash(dotnet clean:*)"
     ],
     "deny": []
   }

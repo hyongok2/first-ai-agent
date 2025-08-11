@@ -5,6 +5,7 @@ using McpAgent.Configuration;
 using McpAgent.Domain.Entities;
 using McpAgent.Domain.Interfaces;
 using McpAgent.Domain.Services;
+using McpAgent.Infrastructure.CLI;
 using McpAgent.Infrastructure.LLM;
 using McpAgent.Infrastructure.Logging;
 using McpAgent.Infrastructure.MCP;
@@ -20,6 +21,8 @@ using Microsoft.Extensions.Options;
 
 try
 {
+    // CLI 옵션 파싱 및 환경 변수 설정
+    CliOptions.ParseAndSetEnvironmentVariables(args);
     var builder = Host.CreateDefaultBuilder(args)
         .ConfigureAppConfiguration((context, config) =>
         {
@@ -43,6 +46,7 @@ try
             services.Configure<AgentConfiguration>(context.Configuration.GetSection("Agent"));
             services.Configure<LlmConfiguration>(context.Configuration.GetSection("Agent:Llm"));
             services.Configure<PipelineLlmConfiguration>(context.Configuration.GetSection("Agent:PipelineLlm"));
+            services.Configure<AgentSettings>(context.Configuration.GetSection("Agent:Agent"));
             
             // Logging (파일 로깅만, 콘솔 로깅 제거)
             services.AddLogging(builder =>
@@ -57,8 +61,9 @@ try
             // 요청/응답 파일 로거
             services.AddSingleton<IRequestResponseLogger, FileRequestResponseLogger>();
 
-            // Core Agent Orchestrator (using new multi-step pipeline version)
+            // Core Agent Orchestrator (keeping both for gradual migration)
             services.AddSingleton<AgentOrchestrator>();
+            services.AddSingleton<OptimizedAgentOrchestrator>();
 
             // Multi-Step Pipeline Services (using working fallback implementations)
             services.AddSingleton<IInputRefinementService, InputRefinementService>();
@@ -66,6 +71,9 @@ try
             services.AddSingleton<IConversationSummaryService, ConversationSummaryService>();
             services.AddSingleton<IParameterGenerationService, ParameterGenerationService>();
             services.AddSingleton<IResponseGenerationService, ResponseGenerationService>();
+            
+            // New Integrated Analysis Service for optimized pipeline
+            services.AddSingleton<IIntegratedAnalysisService, IntegratedAnalysisService>();
 
             // Legacy Application Services (keeping for compatibility)
             services.AddSingleton<IAgentService, AgentService>();
