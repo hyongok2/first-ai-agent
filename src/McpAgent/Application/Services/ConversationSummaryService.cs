@@ -93,12 +93,12 @@ public class ConversationSummaryService : BaseLlmService<ConversationSummaryServ
         }
     }
 
-    public async Task<ConversationSummary> GetConversationSummaryAsync(
+    public Task<ConversationSummary> GetConversationSummaryAsync(
         string conversationId,
         CancellationToken cancellationToken = default)
     {
         _conversationSummaries.TryGetValue(conversationId, out var summary);
-        return summary ?? new ConversationSummary(conversationId);
+        return Task.FromResult(summary ?? new ConversationSummary(conversationId));
     }
 
     public async Task<string> GetConversationHistoryAsync(

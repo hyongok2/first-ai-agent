@@ -12,11 +12,11 @@ using McpAgent.Infrastructure.Services;
 using McpAgent.Infrastructure.Storage;
 using McpAgent.Presentation.Console;
 using McpAgent.Presentation.Hosting;
-using McpAgent.Shared.Utils;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 try
 {
@@ -78,11 +78,34 @@ try
             services.AddSingleton<IToolExecutor, McpToolExecutor>();
             services.AddSingleton<IConversationRepository, InMemoryConversationRepository>();
 
-            // Process Management
-            services.AddSingleton<IProcessJobManager>(ProcessJobManagerFactory.Create());
 
-            // MCP Client Adapter (using proper MCP protocol implementation)
-            services.AddSingleton<IMcpClientAdapter, ProperMcpClientAdapter>();
+            // HTTP Client Factory for MCP HTTP clients
+            services.AddHttpClient();
+
+            // MCP Client Factory for creating appropriate MCP clients
+            services.AddSingleton<IMcpClientFactory, McpClientFactory>();
+
+            // MCP Client Adapter - HTTP 전용
+            services.AddSingleton<IMcpClientAdapter>(provider =>
+            {
+                var factory = provider.GetRequiredService<IMcpClientFactory>();
+                var config = context.Configuration.GetSection("Agent:Mcp").Get<McpConfiguration>();
+                
+                if (config?.Enabled != true || config.Servers == null || !config.Servers.Any())
+                {
+                    throw new InvalidOperationException("MCP configuration is required. Please configure at least one HTTP MCP server.");
+                }
+                
+                // 서버가 하나면 단일 클라이언트 사용
+                if (config.Servers.Count == 1)
+                {
+                    return factory.CreateClient(config.Servers.First());
+                }
+                
+                // 여러 서버가 있으면 Composite 패턴 사용
+                var compositeLogger = provider.GetRequiredService<ILogger<CompositeMcpClientAdapter>>();
+                return new CompositeMcpClientAdapter(compositeLogger, factory, config);
+            });
 
             // Presentation Services
             services.AddSingleton<IDisplayResult, ConsoleUIService>();

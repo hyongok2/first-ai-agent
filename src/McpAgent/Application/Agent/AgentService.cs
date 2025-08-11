@@ -89,13 +89,15 @@ public class AgentService : IAgentService
             _logger.LogInformation("Initializing MCP client adapter...");
             await _mcpClient.InitializeAsync(cancellationToken);
 
-            // MCP 초기화가 성공했으면 연결된 서버 수만 확인 (이미 연결 테스트 완료)
+            // MCP 초기화가 성공했으면 연결된 서버와 사용 가능한 도구 확인
             var connectedServers = await _mcpClient.GetConnectedServersAsync();
+            var availableTools = await _mcpClient.GetAvailableToolsAsync(cancellationToken);
 
             if (connectedServers.Count > 0)
             {
-                _logger.LogInformation("MCP initialization completed - {ServerCount} servers connected", connectedServers.Count);
-                return true;
+                _logger.LogInformation("MCP initialization completed - {ServerCount} servers connected, {ToolCount} tools available", 
+                    connectedServers.Count, availableTools.Count);
+                return true; // 서버가 연결되어 있으면 성공으로 처리 (도구가 없어도 괜찮음)
             }
             
             _logger.LogWarning("MCP initialized but no servers connected");

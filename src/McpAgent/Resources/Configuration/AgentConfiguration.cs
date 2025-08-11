@@ -39,7 +39,8 @@ public class McpConfiguration
 public class McpServerConfig
 {
     public string Name { get; set; } = string.Empty;
-    public string Command { get; set; } = string.Empty;
-    public List<string> Args { get; set; } = new();
-    public Dictionary<string, string> Env { get; set; } = new();
+    public string Endpoint { get; set; } = string.Empty;
+    public string? ApiKey { get; set; }
+    public int TimeoutSeconds { get; set; } = 30;
+    public Dictionary<string, string> Headers { get; set; } = new();
 }

@@ -264,7 +264,7 @@ public class ParameterGenerationService : BaseLlmService<ParameterGenerationServ
         };
     }
 
-    public async Task<string> RecommendToolAsync(
+    public Task<string> RecommendToolAsync(
         IReadOnlyList<ToolDefinition> availableTools,
         RefinedInput refinedInput,
         string systemContext,
@@ -280,14 +280,14 @@ public class ParameterGenerationService : BaseLlmService<ParameterGenerationServ
 
             Logger.LogInformation("Recommended tool: {Tool}", toolName);
 
-            return toolName;
+            return Task.FromResult(toolName);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to recommend tool");
 
             // Return first available tool as fallback
-            return availableTools.FirstOrDefault()?.Name ?? "echo";
+            return Task.FromResult(availableTools.FirstOrDefault()?.Name ?? "echo");
         }
     }
 

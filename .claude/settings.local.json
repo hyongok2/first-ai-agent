@@ -14,7 +14,14 @@
       "Bash(cp:*)",
       "Bash(rm:*)",
       "Bash(find:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(del \"C:\\src\\work\\ai\\first-ai-agent\\src\\McpAgent\\Infrastructure\\MCP\\ProperMcpClientAdapter.cs\")",
+      "Bash(python test-mcp-server.py:*)",
+      "Bash(curl:*)",
+      "Bash(node:*)",
+      "Bash(dotnet script:*)",
+      "Bash(csc:*)",
+      "Bash(test-json-serialization.exe)"
     ],
     "deny": []
   }
