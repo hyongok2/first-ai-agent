@@ -77,25 +77,13 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
             // MCP 초기화 프로토콜 시도
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(5)); // 5초 타임아웃
-
-            var initParams = new InitializeParams
-            {
-                ProtocolVersion = "2025-06-18",
-                Capabilities = new InitializeCapabilities(),
-                ClientInfo = new ClientInfo
-                {
-                    Name = "McpAgent",
-                    Version = "1.0.0"
-                }
-            };
             
             // MCP 표준 초기화 요청 (JSON-RPC 2.0)
-            var initRequest = new
+            var initRequest = new McpRequest
             {
-                jsonrpc = "2.0",
-                id = GetNextRequestId(),
-                method = "initialize",
-                @params = initParams
+                Id = GetNextRequestId(),
+                Method = "initialize",
+                Params = new InitializeParams()
             };
 
             var response = await SendRequestAsync<object>(
@@ -155,12 +143,11 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
         try
         {
             // MCP 표준 도구 목록 요청 (JSON-RPC 2.0)
-            var toolsRequest = new
+            var toolsRequest = new McpRequest
             {
-                jsonrpc = "2.0",
-                id = GetNextRequestId(),
-                method = "tools/list",
-                @params = new { }
+                Id = GetNextRequestId(),
+                Method = "tools/list",
+                Params = new { }
             };
 
             var response = await SendRequestAsync<McpResponse<ListToolsResult>>(
@@ -246,12 +233,11 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
         }
 
         // MCP 표준 도구 실행 요청 (JSON-RPC 2.0)
-        var request = new
+        var request = new McpRequest
         {
-            jsonrpc = "2.0",
-            id = GetNextRequestId(),
-            method = "tools/call",
-            @params = new
+            Id = GetNextRequestId(),
+            Method = "tools/call",
+            Params = new
             {
                 name = toolName,
                 arguments = arguments
