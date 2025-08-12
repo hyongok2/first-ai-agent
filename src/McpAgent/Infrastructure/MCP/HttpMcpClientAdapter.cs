@@ -24,6 +24,9 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
     private readonly object _nextIdLock = new();
     private int _nextRequestId = 1;
     private bool _isInitialized = false;
+    private bool _isConnected = false;
+    private IReadOnlyList<ToolDefinition>? _cachedTools = null;
+    private readonly object _toolsCacheLock = new();
 
     public HttpMcpClientAdapter(
         ILogger<HttpMcpClientAdapter> logger,
@@ -103,7 +106,8 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
                 timeoutCts.Token);
             
             _isInitialized = true;
-            _logger.LogInformation("Successfully initialized HTTP MCP client for server {ServerName}", 
+            _isConnected = true;
+            _logger.LogInformation("Successfully initialized and connected to HTTP MCP server {ServerName}", 
                 _serverConfig.Name);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -112,19 +116,42 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to connect to HTTP MCP server {ServerName} at {Endpoint}. Server may be offline.", 
+            _logger.LogError(ex, "Failed to connect to HTTP MCP server {ServerName} at {Endpoint}", 
                 _serverConfig.Name, _serverConfig.Endpoint);
             
-            // 연결 실패해도 일단 초기화는 완료로 처리 (나중에 도구 호출할 때 다시 시도)
+            // 연결 실패 시 초기화 상태만 true로 설정 (재시도 가능)
             _isInitialized = true;
-            _logger.LogInformation("HTTP MCP client for server {ServerName} initialized in offline mode", 
+            _isConnected = false;
+            
+            // 연결 실패를 명확히 표시
+            _logger.LogWarning("HTTP MCP server {ServerName} is not available. Tools from this server will not be accessible.", 
                 _serverConfig.Name);
+            
+            // 연결 실패를 상위로 전파하지 않음 (다른 서버는 계속 사용 가능)
         }
     }
 
     public async Task<IReadOnlyList<ToolDefinition>> GetAvailableToolsAsync(CancellationToken cancellationToken = default)
     {
         EnsureInitialized();
+
+        // 연결되지 않은 경우 빈 목록 반환
+        if (!_isConnected)
+        {
+            _logger.LogDebug("Server {ServerName} is not connected, returning empty tool list", _serverConfig.Name);
+            return Array.Empty<ToolDefinition>();
+        }
+
+        // 캐시된 도구 목록이 있으면 바로 반환
+        lock (_toolsCacheLock)
+        {
+            if (_cachedTools != null)
+            {
+                _logger.LogDebug("Returning cached tools for server {ServerName} ({ToolCount} tools)", 
+                    _serverConfig.Name, _cachedTools.Count);
+                return _cachedTools;
+            }
+        }
 
         try
         {
@@ -148,7 +175,15 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
             if (response?.Result?.Tools == null)
             {
                 _logger.LogWarning("No tools found in response from server {ServerName}. Response: {@Response}", _serverConfig.Name, response);
-                return Array.Empty<ToolDefinition>();
+                var emptyTools = Array.Empty<ToolDefinition>();
+                
+                // 빈 도구 목록도 캐시
+                lock (_toolsCacheLock)
+                {
+                    _cachedTools = emptyTools;
+                }
+                
+                return emptyTools;
             }
 
             var tools = response.Result.Tools.Select(t => new ToolDefinition
@@ -175,6 +210,12 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
                 }
             }
 
+            // 도구 목록 캐시
+            lock (_toolsCacheLock)
+            {
+                _cachedTools = tools;
+            }
+
             return tools;
         }
         catch (Exception ex)
@@ -182,14 +223,28 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
             _logger.LogWarning(ex, "Failed to get available tools from HTTP MCP server {ServerName}. Server may be offline.", 
                 _serverConfig.Name);
             
-            // 서버가 오프라인이면 빈 도구 리스트 반환
-            return Array.Empty<ToolDefinition>();
+            // 서버가 오프라인이면 빈 도구 리스트 반환 및 캐시
+            var emptyTools = Array.Empty<ToolDefinition>();
+            lock (_toolsCacheLock)
+            {
+                _cachedTools = emptyTools;
+            }
+            
+            return emptyTools;
         }
     }
 
     public async Task<object?> CallToolAsync(string toolName, Dictionary<string, object> arguments, CancellationToken cancellationToken = default)
     {
         EnsureInitialized();
+
+        // 연결되지 않은 경우 에러 반환
+        if (!_isConnected)
+        {
+            var errorMsg = $"Cannot call tool {toolName}: Server {_serverConfig.Name} is not connected";
+            _logger.LogError(errorMsg);
+            throw new InvalidOperationException(errorMsg);
+        }
 
         // MCP 표준 도구 실행 요청 (JSON-RPC 2.0)
         var request = new
@@ -289,7 +344,8 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
 
     public Task<IReadOnlyList<string>> GetConnectedServersAsync()
     {
-        if (_isInitialized)
+        // 실제로 연결된 경우에만 서버 이름 반환
+        if (_isInitialized && _isConnected)
         {
             return Task.FromResult<IReadOnlyList<string>>(new[] { _serverConfig.Name });
         }
@@ -300,6 +356,14 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
     {
         _logger.LogInformation("Shutting down HTTP MCP client for server {ServerName}", _serverConfig.Name);
         _isInitialized = false;
+        _isConnected = false;
+        
+        // 캐시 초기화
+        lock (_toolsCacheLock)
+        {
+            _cachedTools = null;
+        }
+        
         _httpClient?.Dispose();
         return Task.CompletedTask;
     }

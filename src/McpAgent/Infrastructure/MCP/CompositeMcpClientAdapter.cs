@@ -15,6 +15,8 @@ public class CompositeMcpClientAdapter : IMcpClientAdapter
     private readonly Dictionary<string, IMcpClientAdapter> _clients = new();
     private readonly Dictionary<string, string> _toolToServerMap = new();
     private bool _isInitialized = false;
+    private IReadOnlyList<ToolDefinition>? _cachedAllTools = null;
+    private readonly object _toolsCacheLock = new();
 
     public CompositeMcpClientAdapter(
         ILogger<CompositeMcpClientAdapter> logger,
@@ -66,8 +68,45 @@ public class CompositeMcpClientAdapter : IMcpClientAdapter
         await UpdateToolServerMappingAsync(cancellationToken);
 
         _isInitialized = true;
-        _logger.LogInformation("Composite MCP client initialization complete. Active servers: {ServerCount}", 
-            _clients.Count(c => c.Value != null));
+        
+        // 연결된 서버 수 확인
+        var connectedServers = new List<string>();
+        var failedServers = new List<string>();
+        
+        foreach (var kvp in _clients)
+        {
+            var servers = await kvp.Value.GetConnectedServersAsync();
+            if (servers.Count > 0)
+            {
+                connectedServers.Add(kvp.Key);
+            }
+            else
+            {
+                failedServers.Add(kvp.Key);
+            }
+        }
+        
+        if (connectedServers.Count == 0)
+        {
+            _logger.LogError("No MCP servers could be connected. All {ServerCount} servers failed to initialize.", 
+                failedServers.Count);
+            _logger.LogError("Failed servers: {FailedServers}", string.Join(", ", failedServers));
+        }
+        else
+        {
+            _logger.LogInformation("Composite MCP client initialization complete. Connected: {ConnectedCount}/{TotalCount} servers", 
+                connectedServers.Count, connectedServers.Count + failedServers.Count);
+            
+            if (connectedServers.Count > 0)
+            {
+                _logger.LogInformation("Connected servers: {ConnectedServers}", string.Join(", ", connectedServers));
+            }
+            
+            if (failedServers.Count > 0)
+            {
+                _logger.LogWarning("Failed to connect to servers: {FailedServers}", string.Join(", ", failedServers));
+            }
+        }
     }
 
     private async Task InitializeClientAsync(string serverName, IMcpClientAdapter client, CancellationToken cancellationToken)
@@ -122,6 +161,16 @@ public class CompositeMcpClientAdapter : IMcpClientAdapter
     {
         EnsureInitialized();
 
+        // 캐시된 도구 목록이 있으면 바로 반환
+        lock (_toolsCacheLock)
+        {
+            if (_cachedAllTools != null)
+            {
+                _logger.LogDebug("Returning cached composite tools ({ToolCount} tools)", _cachedAllTools.Count);
+                return _cachedAllTools;
+            }
+        }
+
         var allTools = new List<ToolDefinition>();
         
         foreach (var kvp in _clients)
@@ -151,6 +200,12 @@ public class CompositeMcpClientAdapter : IMcpClientAdapter
 
         _logger.LogInformation("Total available tools: {ToolCount} from {ServerCount} servers", 
             allTools.Count, _clients.Count);
+
+        // 도구 목록 캐시
+        lock (_toolsCacheLock)
+        {
+            _cachedAllTools = allTools;
+        }
 
         return allTools;
     }
@@ -233,13 +288,20 @@ public class CompositeMcpClientAdapter : IMcpClientAdapter
                 var servers = await kvp.Value.GetConnectedServersAsync();
                 if (servers.Any())
                 {
-                    connectedServers.Add($"{kvp.Key} ({servers.Count} connections)");
+                    // 실제로 연결된 서버만 추가
+                    connectedServers.AddRange(servers);
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // 개별 서버 오류는 무시
+                // 개별 서버 오류는 로그에 기록하되 전체 프로세스는 계속
+                _logger.LogDebug(ex, "Error checking connection status for server {ServerName}", kvp.Key);
             }
+        }
+
+        if (connectedServers.Count == 0)
+        {
+            _logger.LogDebug("No MCP servers are currently connected");
         }
 
         return connectedServers;
@@ -260,6 +322,12 @@ public class CompositeMcpClientAdapter : IMcpClientAdapter
         _clients.Clear();
         _toolToServerMap.Clear();
         _isInitialized = false;
+        
+        // 캐시 초기화
+        lock (_toolsCacheLock)
+        {
+            _cachedAllTools = null;
+        }
 
         _logger.LogInformation("All MCP clients have been shut down");
     }
