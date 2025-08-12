@@ -37,7 +37,7 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _serverConfig = serverConfig ?? throw new ArgumentNullException(nameof(serverConfig));
         _requestResponseLogger = requestResponseLogger;
-        
+
         if (string.IsNullOrEmpty(serverConfig.Endpoint))
         {
             throw new ArgumentException("HTTP endpoint is required", nameof(serverConfig));
@@ -50,7 +50,7 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
         // 기본 헤더 설정
         if (!string.IsNullOrEmpty(serverConfig.ApiKey))
         {
-            _httpClient.DefaultRequestHeaders.Authorization = 
+            _httpClient.DefaultRequestHeaders.Authorization =
                 new AuthenticationHeaderValue("Bearer", serverConfig.ApiKey);
         }
 
@@ -69,7 +69,7 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Initializing HTTP MCP client for server {ServerName} at {Endpoint}", 
+        _logger.LogInformation("Initializing HTTP MCP client for server {ServerName} at {Endpoint}",
             _serverConfig.Name, _serverConfig.Endpoint);
 
         try
@@ -77,6 +77,17 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
             // MCP 초기화 프로토콜 시도
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(5)); // 5초 타임아웃
+
+            var initParams = new InitializeParams
+            {
+                ProtocolVersion = "2025-06-18",
+                Capabilities = new InitializeCapabilities(),
+                ClientInfo = new ClientInfo
+                {
+                    Name = "McpAgent",
+                    Version = "1.0.0"
+                }
+            };
             
             // MCP 표준 초기화 요청 (JSON-RPC 2.0)
             var initRequest = new
@@ -84,30 +95,18 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
                 jsonrpc = "2.0",
                 id = GetNextRequestId(),
                 method = "initialize",
-                @params = new
-                {
-                    protocolVersion = "2025-06-18",
-                    capabilities = new
-                    {
-                        tools = new { }
-                    },
-                    clientInfo = new
-                    {
-                        name = "McpAgent",
-                        version = "1.0.0"
-                    }
-                }
+                @params = initParams
             };
-            
+
             var response = await SendRequestAsync<object>(
                 HttpMethod.Post,
                 "/mcp",
                 initRequest,
                 timeoutCts.Token);
-            
+
             _isInitialized = true;
             _isConnected = true;
-            _logger.LogInformation("Successfully initialized and connected to HTTP MCP server {ServerName}", 
+            _logger.LogInformation("Successfully initialized and connected to HTTP MCP server {ServerName}",
                 _serverConfig.Name);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -116,17 +115,17 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to connect to HTTP MCP server {ServerName} at {Endpoint}", 
+            _logger.LogError(ex, "Failed to connect to HTTP MCP server {ServerName} at {Endpoint}",
                 _serverConfig.Name, _serverConfig.Endpoint);
-            
+
             // 연결 실패 시 초기화 상태만 true로 설정 (재시도 가능)
             _isInitialized = true;
             _isConnected = false;
-            
+
             // 연결 실패를 명확히 표시
-            _logger.LogWarning("HTTP MCP server {ServerName} is not available. Tools from this server will not be accessible.", 
+            _logger.LogWarning("HTTP MCP server {ServerName} is not available. Tools from this server will not be accessible.",
                 _serverConfig.Name);
-            
+
             // 연결 실패를 상위로 전파하지 않음 (다른 서버는 계속 사용 가능)
         }
     }
@@ -147,7 +146,7 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
         {
             if (_cachedTools != null)
             {
-                _logger.LogDebug("Returning cached tools for server {ServerName} ({ToolCount} tools)", 
+                _logger.LogDebug("Returning cached tools for server {ServerName} ({ToolCount} tools)",
                     _serverConfig.Name, _cachedTools.Count);
                 return _cachedTools;
             }
@@ -176,13 +175,13 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
             {
                 _logger.LogWarning("No tools found in response from server {ServerName}. Response: {@Response}", _serverConfig.Name, response);
                 var emptyTools = Array.Empty<ToolDefinition>();
-                
+
                 // 빈 도구 목록도 캐시
                 lock (_toolsCacheLock)
                 {
                     _cachedTools = emptyTools;
                 }
-                
+
                 return emptyTools;
             }
 
@@ -194,7 +193,7 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
                 Schema = JsonSerializer.Serialize(t.InputSchema, _jsonOptions)
             }).ToList();
 
-            _logger.LogInformation("Successfully loaded {ToolCount} tools from server {ServerName}: {ToolNames}", 
+            _logger.LogInformation("Successfully loaded {ToolCount} tools from server {ServerName}: {ToolNames}",
                 tools.Count, _serverConfig.Name, string.Join(", ", tools.Select(t => t.Name)));
 
             // 각 도구의 파라미터 정보 로그 출력
@@ -202,10 +201,10 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
             {
                 _logger.LogInformation("Tool {ToolName} schema: {Schema}", tool.Name, tool.Schema);
                 _logger.LogInformation("Tool {ToolName} parameters count: {Count}", tool.Name, tool.Parameters.Count);
-                
+
                 foreach (var (paramName, paramDef) in tool.Parameters)
                 {
-                    _logger.LogInformation("  Parameter {ParamName}: Type={Type}, Required={Required}, Description={Description}", 
+                    _logger.LogInformation("  Parameter {ParamName}: Type={Type}, Required={Required}, Description={Description}",
                         paramName, paramDef.Type, paramDef.Required, paramDef.Description);
                 }
             }
@@ -220,16 +219,16 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to get available tools from HTTP MCP server {ServerName}. Server may be offline.", 
+            _logger.LogWarning(ex, "Failed to get available tools from HTTP MCP server {ServerName}. Server may be offline.",
                 _serverConfig.Name);
-            
+
             // 서버가 오프라인이면 빈 도구 리스트 반환 및 캐시
             var emptyTools = Array.Empty<ToolDefinition>();
             lock (_toolsCacheLock)
             {
                 _cachedTools = emptyTools;
             }
-            
+
             return emptyTools;
         }
     }
@@ -283,7 +282,7 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
                 WriteIndented = true  // 로그 가독성을 위해 들여쓰기 추가
             });
-            
+
             stopwatch.Stop();
 
             // MCP 요청/응답 로깅 (요청 완료 직후)
@@ -336,7 +335,7 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
                     CancellationToken.None));
             }
 
-            _logger.LogError(ex, "Failed to call tool {ToolName} on HTTP MCP server {ServerName}", 
+            _logger.LogError(ex, "Failed to call tool {ToolName} on HTTP MCP server {ServerName}",
                 toolName, _serverConfig.Name);
             throw;
         }
@@ -357,13 +356,13 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
         _logger.LogInformation("Shutting down HTTP MCP client for server {ServerName}", _serverConfig.Name);
         _isInitialized = false;
         _isConnected = false;
-        
+
         // 캐시 초기화
         lock (_toolsCacheLock)
         {
             _cachedTools = null;
         }
-        
+
         _httpClient?.Dispose();
         return Task.CompletedTask;
     }
@@ -387,7 +386,7 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
     private Dictionary<string, ParameterDefinition> ConvertSchemaToParameters(McpToolInputSchema inputSchema)
     {
         var parameters = new Dictionary<string, ParameterDefinition>();
-        
+
         if (inputSchema?.Properties != null)
         {
             foreach (var (paramName, property) in inputSchema.Properties)
@@ -398,11 +397,11 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
                     Description = property.Description ?? "",
                     Required = inputSchema.Required?.Contains(paramName) ?? false
                 };
-                
+
                 parameters[paramName] = paramDef;
             }
         }
-        
+
         return parameters;
     }
 
@@ -413,7 +412,7 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
         CancellationToken cancellationToken) where TResponse : class
     {
         using var request = new HttpRequestMessage(method, path);
-        
+
         if (requestBody != null)
         {
             var json = JsonSerializer.Serialize(requestBody, _jsonOptions);
@@ -421,12 +420,12 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
         }
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);
-        
+
         var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-        
+
         _logger.LogDebug("HTTP MCP response from {ServerName}: Status={StatusCode}, Content={Content}",
             _serverConfig.Name, response.StatusCode, responseContent);
-        
+
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogError("HTTP MCP request failed with status {StatusCode}: {Content}",
@@ -442,13 +441,13 @@ public class HttpMcpClientAdapter : IMcpClientAdapter
         try
         {
             var deserializedResponse = JsonSerializer.Deserialize<TResponse>(responseContent, _jsonOptions);
-            _logger.LogDebug("Successfully deserialized response to {ResponseType} from server {ServerName}", 
+            _logger.LogDebug("Successfully deserialized response to {ResponseType} from server {ServerName}",
                 typeof(TResponse).Name, _serverConfig.Name);
             return deserializedResponse;
         }
         catch (JsonException ex)
         {
-            _logger.LogError(ex, "Failed to deserialize JSON response from server {ServerName}. Content: {Content}", 
+            _logger.LogError(ex, "Failed to deserialize JSON response from server {ServerName}. Content: {Content}",
                 _serverConfig.Name, responseContent);
             throw;
         }
