@@ -18,6 +18,7 @@ public class AgentOrchestrator
     private readonly IResponseGenerationService _responseGenerationService;
     private readonly IConversationRepository _conversationRepository;
     private readonly IToolExecutor _toolExecutor;
+    private readonly IHtmlVisualizationService _htmlVisualizationService;
 
     private readonly IDisplayProcess _displayProcess;
     private readonly AgentSettings _agentSettings;
@@ -30,6 +31,7 @@ public class AgentOrchestrator
         IResponseGenerationService responseGenerationService,
         IConversationRepository conversationRepository,
         IToolExecutor toolExecutor,
+        IHtmlVisualizationService htmlVisualizationService,
         IDisplayProcess displayProcess,
         IOptions<AgentSettings> agentSettings)
     {
@@ -40,6 +42,7 @@ public class AgentOrchestrator
         _responseGenerationService = responseGenerationService ?? throw new ArgumentNullException(nameof(responseGenerationService));
         _conversationRepository = conversationRepository ?? throw new ArgumentNullException(nameof(conversationRepository));
         _toolExecutor = toolExecutor ?? throw new ArgumentNullException(nameof(toolExecutor));
+        _htmlVisualizationService = htmlVisualizationService ?? throw new ArgumentNullException(nameof(htmlVisualizationService));
         _displayProcess = displayProcess ?? throw new ArgumentNullException(nameof(displayProcess));
         _agentSettings = agentSettings?.Value ?? throw new ArgumentNullException(nameof(agentSettings));
     }
@@ -170,6 +173,37 @@ public class AgentOrchestrator
                     break;
                 }
 
+                // Step 3 & 4: HTML Visualization Execution
+                if (selectedCapability.Type == SystemCapabilityType.HtmlVisualization)
+                {
+                    _displayProcess.DisplayProcess($"HTML 시각화를 생성합니다... [사이클: {cycleCount}]");
+                    var toolExecution = await ExecuteToolAsync(
+                        selectedCapability,
+                        refinedInput,
+                        conversationHistory,
+                        systemContext,
+                        cumulativePlans,
+                        cycleCount,
+                        cancellationToken);
+
+                    if (toolExecution != null)
+                    {
+                        allToolExecutionResults.Add(toolExecution);
+
+                        // HTML 시각화 완료 후 최종 응답 생성
+                        _displayProcess.DisplayProcess($"HTML 시각화가 완료되었습니다. 최종 응답을 생성 중입니다... [사이클: {cycleCount}]");
+                        
+                        finalResponse = await _responseGenerationService.GenerateResponseAsync(
+                            refinedInput,
+                            new SystemCapability(SystemCapabilityType.TaskCompletion, "HTML 시각화 완료", "HTML 시각화가 성공적으로 생성되었습니다."),
+                            conversationHistory,
+                            allToolExecutionResults,
+                            systemContext,
+                            cancellationToken);
+                        break;
+                    }
+                }
+
                 // Step 3 & 4: Tool Execution (if needed)
                 if (selectedCapability.Type == SystemCapabilityType.McpTool)
                 {
@@ -257,17 +291,30 @@ public class AgentOrchestrator
                     }
                     else
                     {
-                        // MCP 도구가 아닌 경우 (SimpleChat, IntentClarification 등) 최종 응답 생성
-                        _logger.LogInformation("Cycle {CycleCount} - Non-tool capability selected, generating response", cycleCount);
-                        _displayProcess.DisplayProcess($"사용자 응답을 생성 중입니다... [사이클: {cycleCount}]");
-                        finalResponse = await _responseGenerationService.GenerateResponseAsync(
-                            refinedInput,
-                            selectedCapability,
-                            conversationHistory,
-                            allToolExecutionResults,
-                            systemContext,
-                            cancellationToken);
-                        break;
+                        // SimpleChat, IntentClarification 등의 경우만 최종 응답 생성
+                        // HtmlVisualization은 이미 위에서 처리됨
+                        if (selectedCapability.Type == SystemCapabilityType.SimpleChat ||
+                            selectedCapability.Type == SystemCapabilityType.IntentClarification ||
+                            selectedCapability.Type == SystemCapabilityType.ErrorHandling)
+                        {
+                            _logger.LogInformation("Cycle {CycleCount} - Non-tool capability selected, generating response", cycleCount);
+                            _displayProcess.DisplayProcess($"사용자 응답을 생성 중입니다... [사이클: {cycleCount}]");
+                            finalResponse = await _responseGenerationService.GenerateResponseAsync(
+                                refinedInput,
+                                selectedCapability,
+                                conversationHistory,
+                                allToolExecutionResults,
+                                systemContext,
+                                cancellationToken);
+                            break;
+                        }
+                        else
+                        {
+                            // 예상하지 못한 능력 타입의 경우 로그 출력 후 계속 진행
+                            _logger.LogWarning("Cycle {CycleCount} - Unexpected capability type: {Type}, continuing to next cycle", 
+                                cycleCount, selectedCapability.Type);
+                            continue;
+                        }
                     }
                 }
             }
@@ -324,6 +371,13 @@ public class AgentOrchestrator
         int cycleCount,
         CancellationToken cancellationToken)
     {
+        // HTML 시각화 처리
+        if (selectedCapability.Type == SystemCapabilityType.HtmlVisualization)
+        {
+            return await ExecuteHtmlVisualizationAsync(selectedCapability, refinedInput, cycleCount, cancellationToken);
+        }
+
+        // 기존 MCP 도구 처리
         var toolName = ExtractToolName(selectedCapability);
         _logger.LogInformation("Cycle {CycleCount} - Step 3: Parameter generation for tool: {ToolName}", cycleCount, toolName);
 
@@ -422,5 +476,65 @@ public class AgentOrchestrator
             cycleCount, selectedTool.Name, toolCall.IsSuccess);
 
         return toolExecution;
+    }
+
+    private async Task<ToolExecution> ExecuteHtmlVisualizationAsync(
+        SystemCapability selectedCapability,
+        RefinedInput refinedInput,
+        int cycleCount,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Cycle {CycleCount} - Executing HTML visualization", cycleCount);
+        
+        var startTime = DateTime.UtcNow;
+        
+        try
+        {
+            // 시각화 데이터 추출 (선택적)
+            var data = selectedCapability.Parameters.TryGetValue("data", out var dataObj)
+                ? dataObj?.ToString()
+                : null;
+
+            // HTML 시각화 생성 및 브라우저에서 열기
+            var result = await _htmlVisualizationService.CreateAndOpenVisualizationAsync(
+                refinedInput.RefinedQuery, 
+                data, 
+                cancellationToken);
+
+            var endTime = DateTime.UtcNow;
+
+            var toolExecution = new ToolExecution
+            {
+                ToolName = "HtmlVisualization",
+                Parameters = selectedCapability.Parameters,
+                Result = result.IsSuccess 
+                    ? $"HTML 시각화가 성공적으로 생성되었습니다. 파일 경로: {result.FilePath}"
+                    : $"HTML 시각화 생성 실패: {result.ErrorMessage}",
+                IsSuccess = result.IsSuccess,
+                StartTime = startTime,
+                EndTime = endTime
+            };
+
+            _logger.LogInformation("Cycle {CycleCount} - HTML visualization executed with success: {IsSuccess}", 
+                cycleCount, result.IsSuccess);
+
+            return toolExecution;
+        }
+        catch (Exception ex)
+        {
+            var endTime = DateTime.UtcNow;
+            
+            _logger.LogError(ex, "Cycle {CycleCount} - HTML visualization execution failed", cycleCount);
+
+            return new ToolExecution
+            {
+                ToolName = "HtmlVisualization",
+                Parameters = selectedCapability.Parameters,
+                Result = $"HTML 시각화 실행 중 오류 발생: {ex.Message}",
+                IsSuccess = false,
+                StartTime = startTime,
+                EndTime = endTime
+            };
+        }
     }
 }

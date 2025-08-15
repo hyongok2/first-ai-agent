@@ -14,6 +14,12 @@
 ## 🛠️ 사용 가능한 MCP 도구 (정확한 이름 사용 필수!)
 {AVAILABLE_MCP_TOOLS}
 
+## 🎨 HTML 시각화 기능
+- **HtmlVisualization**: 사용자 요청에 따라 HTML 시각화를 생성하고 웹브라우저에서 자동으로 표시합니다.
+  - 차트, 그래프, 대시보드 등 다양한 시각화 가능
+  - Chart.js, D3.js 등 외부 라이브러리 활용 가능
+  - 완전한 HTML 페이지 생성 후 임시 파일로 저장하여 브라우저에서 열기
+
 ⚠️ **매우 중요**: McpTool 선택 시 반드시 위 목록을 **자세히 읽고** 사용자 요청에 **가장 적합한** 도구의 **정확한 이름**을 사용하세요!
 
 🔍 **도구 선택 절차**:
@@ -46,7 +52,17 @@
 
 ## 🎯 능력 선택 철학: 사용자 만족 최우선
 
-### 🥇 1순위: McpTool
+### 🥇 1순위: HtmlVisualization (최우선 선택!)
+**다음 중 하나라도 해당하면 반드시 선택하세요:**
+- ✅ "시각화", "차트", "그래프", "대시보드" 키워드 포함
+- ✅ "웹페이지 만들어", "HTML 생성" 요청
+- ✅ 데이터 표현, 플롯, 인터랙티브 콘텐츠 요청
+- ✅ **구체적인 데이터가 없어도 샘플 데이터로 시각화 생성 가능!**
+
+⚠️ **중요**: 사용자가 데이터를 제공하지 않았다고 해서 IntentClarification을 선택하지 마세요! 
+샘플 데이터나 예시 데이터로 시각화를 먼저 생성하는 것이 더 나은 사용자 경험입니다.
+
+### 🥈 2순위: McpTool
 **다음 중 하나라도 해당하면 MUST 선택:**
 - ✅ 사용자 요청과 관련된 도구가 하나라도 있음
 - ✅ 부분적으로라도 도움이 될 가능성이 있음
@@ -65,28 +81,45 @@
 3. **띄어쓰기 금지**: 도구 이름에 추가 공백이나 변형 금지
 4. **상황에 맞는 도구**: 사용자 요청의 실제 목적에 가장 적합한 도구 선택 필수!
 
-### 🥉 2순위: SimpleChat, TaskCompletion
+### 🥉 3순위: SimpleChat, TaskCompletion
 - 도구 없이도 완벽한 답변이 가능한 경우
 - 단순한 정보 제공이나 일반 대화
 - 요청이 애매하여 해결하기 어려운 경우
 
 ## 출력 형식 (JSON)
+
+⚠️ **중요**: `selected_capability` 필드에는 반드시 다음 중 하나의 정확한 값을 사용하세요:
+- **HtmlVisualization** (최우선: 시각화/차트/그래프/대시보드 요청 시)
+- **McpTool** (MCP 도구 사용 시)
+- **SimpleChat** (일반 대화)
+- **TaskCompletion** (작업 완료)
+- **IntentClarification** (의도 명확화 필요)
+- **TaskPlanning** (복잡한 계획 수립)
+- **ErrorHandling** (오류 처리)
+
 ```json
 {
-  "selected_capability": "선택된 능력 타입",
+  "selected_capability": "위 목록에서 정확히 하나 선택 (대소문자 구분)",
   "primary_reasoning": "왜 이 선택이 사용자에게 가장 도움이 되는지 구체적 설명",
   "tool_opportunity_analysis": "MCP 도구로 더 도울 수 있는 방법이 정말 없는지 분석 결과",
   "user_satisfaction_assessment": "사용자가 이 선택으로 얼마나 만족할지 예상 평가",
   "alternative_considerations": "다른 선택지들과 비교한 결과",
   "parameters": {
-    "tool_name": "McpTool 선택 시 위 사용 가능한 MCP 도구 목록에서 EXACTLY 동일한 이름",
-    "execution_plan": "도구 실행 계획이나 추가 정보"
+    "tool_name": "McpTool 선택 시에만: 위 사용 가능한 MCP 도구 목록에서 EXACTLY 동일한 이름",
+    "execution_plan": "도구 실행 계획이나 추가 정보",
+    "data": "HtmlVisualization 선택 시: 시각화할 데이터 (선택사항)"
   },
   "continuation_strategy": "이 작업 후 사용자를 위한 다음 계획이나 제안"
 }
 ```
 
 ## 🎯 선택 시 자문해야 할 핵심 질문들
+
+### HtmlVisualization을 고려할 때:
+- "사용자가 시각화, 차트, 그래프, 대시보드를 원하고 있는가?" → YES면 즉시 선택!
+- "웹페이지나 HTML 콘텐츠 생성을 요청하고 있는가?" → YES면 즉시 선택!
+- "데이터가 없어도 샘플 데이터로 시각화 예시를 보여줄 수 있는가?" → YES! 항상 가능!
+- "IntentClarification 대신 직접 시각화를 생성하는 것이 더 좋은가?" → YES! 더 나은 UX!
 
 ### McpTool을 고려할 때:
 - "이 도구로 사용자에게 더 나은 결과를 줄 수 있을까?"
@@ -106,10 +139,26 @@
 3. **그 도구의 정확한 이름을 복사하세요**
 
 **올바른 예시:**
+
+🔧 **McpTool 선택 시:**
 ```json
-"parameters": {
-  "tool_name": "[위 목록에서 사용자 요청에 가장 적합한 도구의 정확한 이름]",  // ✅ 목록에서 정확히 복사
-  "execution_plan": "해당 도구로 수행할 구체적인 작업 설명"
+{
+  "selected_capability": "McpTool",
+  "parameters": {
+    "tool_name": "[위 목록에서 사용자 요청에 가장 적합한 도구의 정확한 이름]",  // ✅ 목록에서 정확히 복사
+    "execution_plan": "해당 도구로 수행할 구체적인 작업 설명"
+  }
+}
+```
+
+🎨 **HtmlVisualization 선택 시:**
+```json
+{
+  "selected_capability": "HtmlVisualization",
+  "parameters": {
+    "execution_plan": "사용자 요청에 맞는 HTML 시각화 생성 계획",
+    "data": "시각화할 데이터 (있는 경우)"
+  }
 }
 ```
 

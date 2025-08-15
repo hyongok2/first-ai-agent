@@ -46,9 +46,16 @@
 - 추가 도구나 복잡한 처리가 불필요한 경우
 
 다음 경우에는 **추가 처리 필요**로 판단하세요:
+- HTML 시각화가 필요한 경우 (차트, 그래프, 대시보드, 시각적 표현)
 - MCP 도구 실행이 필요한 경우
 - 복잡한 분석이나 계획이 필요한 경우
 - 외부 리소스 접근이 필요한 경우
+
+## 🎨 HTML 시각화 우선 고려사항
+다음 키워드가 포함된 요청은 **HtmlVisualization**을 최우선으로 선택하세요:
+- 차트, 그래프, 대시보드, 시각화, 플롯
+- HTML, 웹페이지, 인터랙티브 콘텐츠
+- 표, 데이터 표현, 통계 시각화
 
 ## 응답 형식
 
@@ -68,11 +75,12 @@ JSON 형태로 응답하세요:
     "confidence_level": "High|Medium|Low"
   },
   "capability_selection": {
-    "selected_capability": "TaskCompletion|SimpleChat|IntentClarification|TaskPlanning|McpTool",
+    "selected_capability": "HtmlVisualization|McpTool|TaskCompletion|SimpleChat|IntentClarification|TaskPlanning",
     "description": "선택된 기능에 대한 설명",
     "reasoning": "이 기능을 선택한 이유",
     "parameters": {
       "tool_name": "도구명 (McpTool인 경우)",
+      "data": "시각화할 데이터 (HtmlVisualization인 경우)",
       "추가_파라미터": "값들"
     }
   },

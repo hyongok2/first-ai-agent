@@ -74,6 +74,9 @@ try
             
             // New Integrated Analysis Service for optimized pipeline
             services.AddSingleton<IIntegratedAnalysisService, IntegratedAnalysisService>();
+            
+            // HTML Visualization Service
+            services.AddSingleton<IHtmlVisualizationService, HtmlVisualizationService>();
 
             // Legacy Application Services (keeping for compatibility)
             services.AddSingleton<IAgentService, AgentService>();

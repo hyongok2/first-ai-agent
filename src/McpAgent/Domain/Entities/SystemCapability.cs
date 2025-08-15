@@ -24,7 +24,10 @@ public enum SystemCapabilityType
     TaskPlanning,
     
     /// <summary>오류 또는 예외 상황 처리</summary>
-    ErrorHandling
+    ErrorHandling,
+    
+    /// <summary>HTML 시각화 생성 및 브라우저 표시</summary>
+    HtmlVisualization
 }
 
 /// <summary>
@@ -59,6 +62,7 @@ public class SystemCapability
         {
             SystemCapabilityType.InternalTool => true,
             SystemCapabilityType.McpTool => true,
+            SystemCapabilityType.HtmlVisualization => true,
             _ => false
         };
     }

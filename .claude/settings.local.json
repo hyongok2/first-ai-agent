@@ -23,8 +23,10 @@
       "Bash(csc:*)",
       "Bash(test-json-serialization.exe)",
       "Bash(copy:*)",
-      "Bash(dotnet clean:*)"
+      "Bash(dotnet clean:*)",
+      "Bash(powershell:*)"
     ],
-    "deny": []
+    "deny": [],
+    "defaultMode": "acceptEdits"
   }
 }

@@ -140,8 +140,15 @@ public class CapabilitySelectionService : BaseLlmService<CapabilitySelectionServ
     {
         var input = refinedInput.ClarifiedIntent.ToLowerInvariant();
         
+        // HTML 시각화 휴리스틱 (최우선)
+        if (input.Contains("시각화") || input.Contains("차트") || input.Contains("그래프") || 
+            input.Contains("대시보드") || input.Contains("html") || input.Contains("웹페이지"))
+        {
+            return SystemCapabilityType.HtmlVisualization;
+        }
+        
         // Simple keyword-based heuristics
-        if (input.Contains("파일") || input.Contains("웹") || input.Contains("검색") || input.Contains("api"))
+        if (input.Contains("파일") || input.Contains("검색") || input.Contains("api"))
         {
             return SystemCapabilityType.McpTool;
         }
